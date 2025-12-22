@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bigdata News Terminal</title>
+    <link rel="icon" type="image/png" href="https://app.bigdata.com/icons/logo-squared-production-512x512.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-primary': '#151515',
+                        'accent-subtle': '#8d99ae',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Tooltip for header */
+        .tooltip {
+            position: absolute;
+            background: #21262d;
+            color: #c9d1d9;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #30363d;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .tooltip.show {
+            opacity: 1;
+        }
+        
+        /* Dropdown panel for "How it works" */
+        .dropdown-panel {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 8px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            z-index: 50;
+        }
+        
+        .dropdown-panel.show {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-bg-primary text-gray-100 font-sans">
+    <!-- Sticky Header -->
+    <header class="sticky top-0 z-50 bg-black/70 backdrop-blur-sm border-b border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Left: Logo + Title -->
+                <div class="flex items-center space-x-3">
+                    <a href="https://platform.bigdata.com/" class="flex items-center">
+                        <img 
+                            src="https://cdn.sanity.io/images/5zq5cwwy/production/31c4eb42fc009ee6678a5ec6e381530b99d740c4-166x36.svg" 
+                            alt="BigData Logo" 
+                            class="h-8"
+                            onerror="this.outerHTML='<span class=\'text-white font-bold\'>BigData</span>'"
+                        >
+                    </a>
+                    <span class="text-white text-base font-medium">News Terminal Demo</span>
+                </div>
+                
+                <!-- Right: Powered By + How it works + App Grid Icon -->
+                <div class="flex items-center space-x-6">
+                    <!-- Powered By Text -->
+                    <span class="hidden sm:inline text-sm text-gray-400">
+                        Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
+                    </span>
+                    
+                    <!-- How it works dropdown -->
+                    <div class="relative flex items-center">
+                        <button 
+                            id="howItWorksBtn"
+                            class="text-accent-subtle hover:text-white transition-colors text-sm leading-none"
+                        >
+                            How it works
+                        </button>
+                        
+                        <!-- Dropdown Panel -->
+                        <div id="howItWorksPanel" class="dropdown-panel w-96 p-6">
+                            <h3 class="text-lg font-semibold text-white mb-4">How it works</h3>
+                            <div class="text-gray-400 text-sm space-y-3">
+                                <p class="min-h-[200px] border border-dashed border-gray-600 rounded p-4 flex items-center justify-center">
+                                    <span class="text-gray-500">Add your explanation here...</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- App Grid Icon -->
+                    <div class="relative flex items-center">
+                        <a 
+                            href="https://platform.bigdata.com/demo-apps-library"
+                            class="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-700 transition-colors group"
+                            id="appGridIcon"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 group-hover:text-white" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM6,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM6,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM16,6c0,1.1 0.9,2 2,2s2,-0.9 2,-2 -0.9,-2 -2,-2 -2,0.9 -2,6zM12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2z"></path>
+                            </svg>
+                        </a>
+                        <div id="appGridTooltip" class="tooltip">More Demo Apps</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Mobile: Powered By Text -->
+            <div class="md:hidden pb-3 text-xs text-gray-400">
+                Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Terminal Application -->
+    <div class="terminal-container">
+        <!-- Input Bar -->
+        <div class="input-bar">
+            <label>SYMBOL:</label>
+            <input type="text" id="tickerInput" placeholder="AAPL,TSLA,NVDA" maxlength="100">
+            <button id="getNewsBtn" onclick="getNews()">GET NEWS</button>
+            <button id="viewCommentaryBtn" class="view-commentary-button" onclick="toggleCommentarySidebar()" style="display: none;">
+                VIEW COMMENTARY
+            </button>
+            <button id="clearBtn" onclick="clearResults()">CLEAR</button>
+            <span id="articleCount" class="article-count"></span>
+        </div>
+        
+        <!-- Filters Bar -->
+        <div class="filters-bar">
+            <!-- Search Mode -->
+            <div class="filter-group">
+                <button id="topicModeBtn" class="filter-mode-btn active" onclick="setSearchMode('topic')">
+                    <span class="mode-label">Topic News (<span id="topicsCountInline">11</span>)</span>
+                </button>
+                <button id="allModeBtn" class="filter-mode-btn" onclick="setSearchMode('all')">
+                    <span class="mode-label">All News</span>
+                </button>
+            </div>
+            
+            <div class="filter-divider"></div>
+            
+            <!-- Date Range -->
+            <div class="filter-group">
+                <div class="date-filter-buttons">
+                    <button class="date-btn" data-days="1">1D</button>
+                    <button class="date-btn" data-days="7">1W</button>
+                    <button class="date-btn" data-days="30">1M</button>
+                    <button class="date-btn active" data-days="90">3M</button>
+                    <button class="date-btn" data-days="180">6M</button>
+                    <button class="date-btn" data-days="365">1Y</button>
+                </div>
+            </div>
+            
+            <div class="filter-divider advanced-options"></div>
+            
+            <!-- Advanced Options (only for Topic mode) -->
+            <div class="filter-group advanced-options">
+                <label class="filter-checkbox-label">
+                    <input type="checkbox" id="reformulateToggle" class="filter-checkbox-input" onchange="toggleReformulate()">
+                    <span class="checkbox-custom"></span>
+                    <span class="checkbox-label-text">AI Query Expansion</span>
+                </label>
+            </div>
+            
+            <!-- Topics Editor (moved to right) -->
+            <div class="filter-group-right">
+                <button id="topicsDropdown" class="topics-edit-btn" onclick="toggleTopicsPanel()" title="Edit topics">
+                    <span class="topics-label">Edit Topics</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Topics Edit Panel (hidden by default) -->
+        <div id="topicsPanel" class="topics-panel">
+            <div class="topics-panel-header">
+                <span>EDIT TOPICS (use {company} as placeholder):</span>
+            </div>
+            <div id="topicsInputList" class="topics-input-list"></div>
+            <div class="topics-panel-actions">
+                <button class="topics-add-button" onclick="addTopicInput()">+ ADD TOPIC</button>
+                <button class="topics-reset-button" onclick="resetTopicsToDefault()">RESET</button>
+                <button class="topics-save-button" onclick="saveAndCloseTopics()">SAVE & CLOSE</button>
+            </div>
+        </div>
+        
+        <!-- Topic Tabs Bar -->
+        <div id="topicTabsBar" class="topic-tabs-bar">
+            <label class="topic-tabs-label">TOPICS:</label>
+            <div id="topicTabsList" class="topic-tabs-list">
+                <!-- Tabs will be dynamically inserted here -->
+            </div>
+        </div>
+        
+        <!-- Main Content Area (News + Commentary Sidebar) -->
+        <div class="main-content-wrapper">
+            <!-- News Table (Left Side - 70%) -->
+        <div class="news-container">
+            <div class="news-table-header">
+                <div class="col-ticker">TICKER</div>
+                <div class="col-topic">TOPIC</div>
+                <div class="col-headline">HEADLINE</div>
+                <div class="col-price">PRICE</div>
+                <div class="col-change">CHANGE</div>
+                <div class="col-time">TIME</div>
+            </div>
+            <div id="newsFeed" class="news-feed">
+                <div class="welcome-message">
+                    <div class="welcome-title">Welcome to News Terminal</div>
+                    <div class="welcome-text">
+                        Enter ticker symbols to begin
+                        <br><br>
+                        <strong>Try these examples:</strong>
+                        <div class="example-tickers">
+                            <span class="example-ticker" onclick="loadExample('AAPL')">AAPL</span>
+                            <span class="example-ticker" onclick="loadExample('TSLA')">TSLA</span>
+                            <span class="example-ticker" onclick="loadExample('NVDA')">NVDA</span>
+                            <span class="example-ticker" onclick="loadExample('AAPL,TSLA,NVDA')">AAPL,TSLA,NVDA</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Commentary Sidebar (Right Side - 30%) -->
+        <div id="commentarySidebar" class="commentary-sidebar" style="display: none;">
+            <div class="commentary-sidebar-content">
+                <div class="commentary-sidebar-header">
+                    <h3>AI Commentary</h3>
+                    <button class="sidebar-close-btn" onclick="toggleCommentarySidebar()">✕</button>
+                </div>
+                
+                <!-- Load Previous Commentary -->
+                <div class="load-commentary-section">
+                    <label class="load-commentary-label">Load Previous:</label>
+                    <select id="previousCommentarySelect" class="previous-commentary-select" onchange="loadPreviousCommentary()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+                
+                <button id="runCommentaryBtn" class="run-commentary-btn" onclick="generateCommentary()">
+                    <span id="runBtnText">RUN</span>
+                </button>
+                <div id="commentaryStatus" class="commentary-status"></div>
+                
+                <!-- Commentary Display (hidden until generated) -->
+                <div id="commentaryDisplay" class="commentary-display" style="display: none;">
+                    <!-- Desk Note Section -->
+                    <div class="desk-note-section">
+                        <div class="desk-note-header">
+                            <h2>Wall Street Desk Note</h2>
+                            <div class="desk-note-meta">
+                                <span id="commentaryTicker" class="ticker-badge"></span>
+                            </div>
+                        </div>
+                        <div id="deskNoteContent" class="desk-note-content"></div>
+                        <div class="desk-note-actions">
+                            <button onclick="copyDeskNote()" class="action-btn" title="Copy to clipboard">
+                                <svg class="action-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="currentColor"/>
+                                </svg>
+                                Copy
+                            </button>
+                            <button onclick="saveDeskNote()" class="action-btn" title="Save as text file">
+                                <svg class="action-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z" fill="currentColor"/>
+                                </svg>
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Executive Briefs Section (Expandable) -->
+                    <details class="briefs-section">
+                        <summary class="briefs-header">
+                            <h3>Topic Briefs</h3>
+                            <span id="briefsCount" class="briefs-count"></span>
+                        </summary>
+                        <div id="briefsList" class="briefs-list"></div>
+                    </details>
+                </div>
+                
+                <!-- Commentary Error -->
+                <div id="commentaryError" class="commentary-error" style="display: none;"></div>
+            </div>
+        </div>
+        
+        </div> <!-- End main-content-wrapper -->
+    </div>
+    
+    <script src="/static/app.js?v=3.4"></script>
+    
+    <script>
+        // Header dropdown functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const howItWorksBtn = document.getElementById('howItWorksBtn');
+            const howItWorksPanel = document.getElementById('howItWorksPanel');
+            const appGridIcon = document.getElementById('appGridIcon');
+            const appGridTooltip = document.getElementById('appGridTooltip');
+            
+            // Toggle dropdown panel
+            howItWorksBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                howItWorksPanel.classList.toggle('show');
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!howItWorksPanel.contains(e.target) && e.target !== howItWorksBtn) {
+                    howItWorksPanel.classList.remove('show');
+                }
+            });
+            
+            // Prevent closing when clicking inside panel
+            howItWorksPanel.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+            
+            // App grid tooltip
+            appGridIcon.addEventListener('mouseenter', function(e) {
+                const rect = appGridIcon.getBoundingClientRect();
+                appGridTooltip.style.top = (rect.bottom + 5) + 'px';
+                appGridTooltip.style.left = (rect.left + rect.width / 2) + 'px';
+                appGridTooltip.style.transform = 'translateX(-50%)';
+                appGridTooltip.classList.add('show');
+            });
+            
+            appGridIcon.addEventListener('mouseleave', function() {
+                appGridTooltip.classList.remove('show');
+            });
+        });
+    </script>
+</body>
+</html>

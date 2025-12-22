@@ -1,0 +1,19 @@
+BIGDATA_API_KEY=YOUR_KEY_HERE
+
+# Gemini AI Authentication - Choose ONE method:
+
+# Method 1: ADC (Application Default Credentials) - Recommended for Google Cloud
+# Uses HttpOptions to auto-detect credentials from gcloud CLI or GCP metadata service
+
+USE_ADC=true
+GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
+GOOGLE_CLOUD_LOCATION=****
+GOOGLE_GENAI_USE_VERTEXAI=True
+LLM_PROVIDER=gemini
+
+# Method 2: API Key - Simple authentication for local development
+# GEMINI_API_KEY=YOUR_KEY_HERE
+
+# Method 3: Vertex AI with Service Account
+# GOOGLE_APPLICATION_CREDENTIALS=YOUR_CREDENTIALS_FILE_HERE
+# GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
