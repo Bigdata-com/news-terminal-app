@@ -180,80 +180,153 @@ BASELINE_ONLY_CONFIG = SearchConfig(
 )
 
 
+# Web UI uses this to replace stale topics in localStorage. Increment **every** time you
+# add/remove/reorder/edit entries in DEFAULT_TOPICS (not only when changing categories).
+DEFAULT_TOPICS_REVISION: int = 2
+
+
+def safe_default_topics_revision() -> int:
+    """Return ``DEFAULT_TOPICS_REVISION`` as an int >= 1 for API consumers."""
+    try:
+        r = int(DEFAULT_TOPICS_REVISION)
+    except (TypeError, ValueError):
+        return 1
+    return r if r >= 1 else 1
+
+
 DEFAULT_TOPICS = [
-    # Earnings & Financial Performance
-    {"topic_name": "Financial Metrics", "topic_text": "What key takeaways emerged from {company}'s latest earnings report?"},
-    {"topic_name": "Financial Metrics", "topic_text": "What notable changes in {company}'s financial performance metrics have been reported recently?"},
-    {"topic_name": "Financial Metrics", "topic_text": "Has {company} revised its financial or operational guidance for upcoming periods?"},
-    
-    # Strategy & Business Development
-    {"topic_name": "M&A", "topic_text": "What significant strategic initiatives or business pivots has {company} announced recently?"},
-    {"topic_name": "M&A", "topic_text": "What material acquisition, merger, or divestiture activities involve {company} currently?"},
-    
-    # Leadership & Organization
-    {"topic_name": "Leadership", "topic_text": "What executive leadership changes have been announced at {company} recently?"},
-    
-    # Commercial & Market Activity
-    {"topic_name": "Competition", "topic_text": "What significant contract wins, losses, or renewals has {company} recently announced?"},
-    {"topic_name": "Competition", "topic_text": "What notable market share shifts has {company} experienced recently?"},
-    {"topic_name": "Competition", "topic_text": "How is {company} responding to new competitive threats or significant competitor actions?"},
-    
-    # Product & Innovation
-    {"topic_name": "Products", "topic_text": "What significant new product launches or pipeline developments has {company} announced?"},
-    
-    # Operations & Supply Chain
-    {"topic_name": "Supply Chain", "topic_text": "What material operational disruptions or capacity changes is {company} experiencing currently?"},
-    {"topic_name": "Supply Chain", "topic_text": "How are supply chain conditions affecting {company}'s operations and outlook?"},
-    {"topic_name": "Supply Chain", "topic_text": "What production milestones or efficiency improvements has {company} achieved recently?"},
-    
-    # Cost Management
-    {"topic_name": "Costs", "topic_text": "What cost-cutting measures or expense management initiatives has {company} recently disclosed?"},
-    
-    # Regulatory & Legal
-    {"topic_name": "Regulatory", "topic_text": "What specific regulatory developments are materially affecting {company}?"},
-    {"topic_name": "Regulatory", "topic_text": "What material litigation developments involve {company} currently?"},
-    
-    # Macro & Industry Trends
-    {"topic_name": "Industry", "topic_text": "How are current macroeconomic factors affecting {company}'s performance and outlook?"},
-    {"topic_name": "Industry", "topic_text": "What industry-specific trends or disruptions are directly affecting {company}?"},
-    
-    # Capital Allocation & Financing
-    {"topic_name": "Financing", "topic_text": "What significant capital allocation decisions has {company} announced recently?"},
-    {"topic_name": "Financing", "topic_text": "What changes to dividends, buybacks, or other shareholder return programs has {company} announced?"},
-    {"topic_name": "Financing", "topic_text": "What debt issuance, refinancing, or covenant changes has {company} recently announced?"},
-    {"topic_name": "Financing", "topic_text": "Have there been any credit rating actions or outlook changes for {company} recently?"},
-    
-    # Market Sentiment & Events
-    {"topic_name": "Markets", "topic_text": "What shifts in the prevailing narrative around {company} are emerging among influential investors?"},
-    {"topic_name": "Markets", "topic_text": "What significant events could impact {company}'s performance in the near term?"},
-    {"topic_name": "Markets", "topic_text": "What unexpected disclosures or unusual trading patterns has {company} experienced recently?"},
-    {"topic_name": "Markets", "topic_text": "Is there any activist investor involvement or significant shareholder actions affecting {company}?"},
+
+    # ── FINANCIAL METRICS ────────────────────────────────────────────────
+    {"topic_name": "Financial Metrics",
+     "topic_text": "{company} reported earnings results beating or missing revenue and profit expectations"},
+    {"topic_name": "Financial Metrics",
+     "topic_text": "{company} announced changes to full year financial guidance or operational outlook"},
+    {"topic_name": "Financial Metrics",
+     "topic_text": "{company} showing notable improvement or deterioration in margins revenue or profitability"},
+
+    # ── M&A ──────────────────────────────────────────────────────────────
+    {"topic_name": "M&A",
+     "topic_text": "{company} agreed to acquire a company for billions in a cash or stock deal"},
+    {"topic_name": "M&A",
+     "topic_text": "{company} selling divesting or spinning off a business unit or subsidiary"},
+    {"topic_name": "M&A",
+     "topic_text": "{company} announced a major strategic partnership or joint venture with another company"},
+
+    # ── LEADERSHIP ───────────────────────────────────────────────────────
+    {"topic_name": "Leadership",
+     "topic_text": "{company} names new chief executive or top executive steps down from role"},
+    {"topic_name": "Leadership",
+     "topic_text": "{company} leadership transition as longtime executive departs or senior management reshuffled"},
+
+    # ── COMPETITION ──────────────────────────────────────────────────────
+    {"topic_name": "Competition",
+     "topic_text": "{company} won or lost a significant customer contract or renewed a major deal"},
+    {"topic_name": "Competition",
+     "topic_text": "{company} losing or gaining market share to competitors in its core business"},
+    {"topic_name": "Competition",
+     "topic_text": "{company} responding to new competitive threat or disruptive market entrant"},
+
+    # ── PRODUCTS ─────────────────────────────────────────────────────────
+    {"topic_name": "Products",
+     "topic_text": "{company} launched a new product service or announced a significant pipeline development"},
+
+    # ── SUPPLY CHAIN ─────────────────────────────────────────────────────
+    {"topic_name": "Supply Chain",
+     "topic_text": "{company} experiencing operational disruptions capacity constraints or logistics challenges"},
+    {"topic_name": "Supply Chain",
+     "topic_text": "supply chain disruptions or input shortages affecting {company} production and margins"},
+    {"topic_name": "Supply Chain",
+     "topic_text": "{company} achieved production milestone or announced manufacturing efficiency improvement"},
+
+    # ── COSTS ────────────────────────────────────────────────────────────
+    {"topic_name": "Costs",
+     "topic_text": "{company} announced cost cutting restructuring layoffs or expense reduction program"},
+
+    # ── REGULATORY ───────────────────────────────────────────────────────
+    {"topic_name": "Regulatory",
+     "topic_text": "new regulation or government policy materially affecting {company} business or compliance costs"},
+    {"topic_name": "Regulatory",
+     "topic_text": "{company} facing material litigation legal judgment or adverse court ruling"},
+
+    # ── INDUSTRY ─────────────────────────────────────────────────────────
+    {"topic_name": "Industry",
+     "topic_text": "macroeconomic headwinds or tailwinds from interest rates inflation or consumer demand affecting {company}"},
+    {"topic_name": "Industry",
+     "topic_text": "structural industry shift or sector disruption directly impacting {company} competitive position"},
+
+    # ── FINANCING ────────────────────────────────────────────────────────
+    {"topic_name": "Financing",
+     "topic_text": "{company} announced share buyback dividend increase capital raise or major capital allocation decision"},
+    {"topic_name": "Financing",
+     "topic_text": "{company} increased reduced or suspended dividend or shareholder return program"},
+    {"topic_name": "Financing",
+     "topic_text": "{company} raised capital through new bond offering or senior notes issuance"},
+    {"topic_name": "Financing",
+     "topic_text": "{company} refinanced its debt or extended maturity on existing credit facilities"},
+    {"topic_name": "Financing",
+     "topic_text": "{company} credit rating upgraded downgraded or placed on outlook watch by rating agency"},
+
+    # ── MARKETS ──────────────────────────────────────────────────────────
+    {"topic_name": "Markets",
+     "topic_text": "institutional investors or analysts shifting sentiment on {company} outlook or valuation"},
+    {"topic_name": "Markets",
+     "topic_text": "upcoming catalyst event risk or macro development that could move {company} stock"},
+    {"topic_name": "Markets",
+     "topic_text": "{company} made an unexpected disclosure or is subject to unusual trading activity or short interest"},
+    {"topic_name": "Markets",
+     "topic_text": "activist investor building stake in {company} or pushing for strategic or governance changes"},
 ]
 
-# Topic categories for grouping (optional, for future use)
+# Topic categories for grouping (indices align with DEFAULT_TOPICS order)
 TOPIC_CATEGORIES = {
-    "earnings": [0, 1, 2],
-    "strategy": [3, 4],
-    "leadership": [5],
-    "commercial": [6, 7, 8],
-    "products": [9],
-    "operations": [10, 11, 12],
-    "costs": [13],
-    "regulatory": [14, 15],
-    "macro": [16, 17],
-    "capital": [18, 19, 20, 21],
-    "sentiment": [22, 23, 24, 25],
+    "financial_metrics": [0, 1, 2],
+    "ma": [3, 4, 5],
+    "leadership": [6, 7],
+    "competition": [8, 9, 10],
+    "products": [11],
+    "supply_chain": [12, 13, 14],
+    "costs": [15],
+    "regulatory": [16, 17],
+    "industry": [18, 19],
+    "financing": [20, 21, 22, 23, 24],
+    "markets": [25, 26, 27, 28],
 }
+
+# Pre-refactor ``get_topic_category`` / TOPIC_CATEGORIES keys (different index layout).
+# Use ``normalize_topic_category_slug`` if you persist old slugs in tools or dashboards.
+TOPIC_CATEGORY_LEGACY_SLUGS: dict[str, str] = {
+    "earnings": "financial_metrics",
+    "strategy": "ma",
+    "leadership": "leadership",
+    "commercial": "competition",
+    "products": "products",
+    "operations": "supply_chain",
+    "costs": "costs",
+    "regulatory": "regulatory",
+    "macro": "industry",
+    "capital": "financing",
+    "sentiment": "markets",
+}
+
+
+def normalize_topic_category_slug(slug: str) -> str:
+    """Map legacy category slugs to current ``TOPIC_CATEGORIES`` keys (case-insensitive)."""
+    key = slug.strip().lower()
+    return TOPIC_CATEGORY_LEGACY_SLUGS.get(key, key)
+
 
 def get_topic_category(topic_index: int) -> str:
     """
-    Get category name for a topic index.
-    
+    Get category slug for a topic index (matches keys in TOPIC_CATEGORIES).
+
+    If you stored older slugs (e.g. ``earnings``, ``capital``), pass them through
+    :func:`normalize_topic_category_slug`.
+
     Args:
         topic_index: Index of topic in DEFAULT_TOPICS list
-        
+
     Returns:
-        Category name or "uncategorized"
+        Category slug or "uncategorized"
     """
     for category, indices in TOPIC_CATEGORIES.items():
         if topic_index in indices:

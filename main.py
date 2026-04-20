@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from services import price_service
 from services.topic_search_service import TopicSearchService
 from services.report_service import ReportService
-from config.topics import DEFAULT_TOPICS, list_available_configs
+from config.topics import DEFAULT_TOPICS, list_available_configs, safe_default_topics_revision
 
 
 # Pydantic models for request bodies
@@ -832,6 +832,7 @@ async def get_config():
     """Get default configuration including topics"""
     return {
         "default_topics": DEFAULT_TOPICS,
+        "default_topics_revision": safe_default_topics_revision(),
         "available_configs": list_available_configs(),
         "topic_count": len(DEFAULT_TOPICS),
         "commentary_available": report_service is not None

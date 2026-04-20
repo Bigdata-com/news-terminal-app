@@ -32,6 +32,15 @@ load_dotenv()
 console = Console()
 
 
+def format_default_topic_for_display(topic: object, company_name: str) -> str:
+    """Format a DEFAULT_TOPICS entry (dict with topic_text or legacy string) for console output."""
+    if isinstance(topic, dict):
+        text = topic.get("topic_text", "")
+    else:
+        text = str(topic)
+    return text.format(company=company_name)
+
+
 def deduplicate_articles(articles: list, field: str = "headline", threshold: float = 0.85) -> tuple[list, dict, list, dict]:
     """
     Deduplicate articles using semantic similarity on specified field.
@@ -159,7 +168,7 @@ def display_topics(company_name: str, show_all: bool = False):
     console.print()
     
     # Format topics with company name
-    formatted_topics = [topic.format(company=company_name) for topic in DEFAULT_TOPICS]
+    formatted_topics = [format_default_topic_for_display(topic, company_name) for topic in DEFAULT_TOPICS]
     
     if show_all:
         # Show all topics in a table
@@ -250,7 +259,10 @@ def display_query_reformulation_breakdown(results: dict, show_all: bool = False)
     
     # Show 3-5 example topics
     sample_count = 5 if show_all else 3
-    formatted_topics = [topic.format(company=results.get('company_name', 'Company')) for topic in DEFAULT_TOPICS[:sample_count]]
+    company = results.get("company_name", "Company")
+    formatted_topics = [
+        format_default_topic_for_display(topic, company) for topic in DEFAULT_TOPICS[:sample_count]
+    ]
     
     for i, original_topic in enumerate(formatted_topics, 1):
         console.print(f"[bold green]Topic {i}:[/bold green]")

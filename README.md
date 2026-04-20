@@ -41,7 +41,8 @@ news_terminal/
 │   └── cli_entity_search.py
 ├── config/                 # Configuration
 │   ├── prompts.yaml        # AI prompt templates
-│   └── topics.py           # Search topics
+│   └── topics.py           # Search topics & ``DEFAULT_TOPICS_REVISION``
+├── tests/                  # Pytest (Gemini auth, topics, CLI helpers)
 ├── static/                 # Web UI assets
 │   ├── index.html
 │   ├── style.css
@@ -181,7 +182,7 @@ python scripts/cli_entity_search.py "Tesla"
 python scripts/cli_entity_search.py "AAPL" --type ticker
 ```
 
-See [docs/CLI_TOOLS.md](docs/CLI_TOOLS.md) for detailed CLI documentation.
+Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 
 ## API Endpoints
 
@@ -189,6 +190,7 @@ See [docs/CLI_TOOLS.md](docs/CLI_TOOLS.md) for detailed CLI documentation.
 - `POST /api/news/{ticker}` - Get news for a single ticker (JSON body)
 - `POST /api/news-multi` - Get news for multiple tickers (JSON body)
 - `GET /api/health` - Health check
+- `GET /api/config` - Default topics, ``default_topics_revision``, and commentary availability
 - `GET /api/cache/stats` - Cache statistics
 - `POST /api/cache/clear` - Clear cache
 
@@ -202,12 +204,15 @@ See [docs/CLI_TOOLS.md](docs/CLI_TOOLS.md) for detailed CLI documentation.
   "query_reformulation": false,
   "since_minutes": null,
   "topics": [
-    {"topic_name": "Earnings", "topic_text": "What key takeaways emerged from {company}'s latest earnings report?"}
+    {
+      "topic_name": "Financial Metrics",
+      "topic_text": "{company} reported earnings results beating or missing revenue and profit expectations"
+    }
   ]
 }
 ```
 
-For multi-ticker requests, add `"tickers": ["AAPL", "TSLA", "NVDA"]` to the body.
+Omit ``topics`` to use the server default list from ``config/topics.py`` (currently ~29 topic rows). For multi-ticker requests, add `"tickers": ["AAPL", "TSLA", "NVDA"]` to the body.
 
 ## Usage
 
@@ -238,7 +243,7 @@ When enabled, the terminal automatically fetches new articles every 60 seconds u
 - **FastAPI Application** (`main.py`) - RESTful API with async support
 - **Topic Search Service** - Multi-query search with AI reformulation
 - **Report Service** - AI-powered commentary generation
-- **Gemini Service** - Google AI integration (API key or Vertex AI)
+- **Gemini Service** - Google AI integration (Gemini API key, Vertex with service account, or Vertex with ADC)
 - **Company Cache** - Knowledge Graph API integration with caching
 - **Rate Limiter** - Intelligent API rate limiting
 - **Price Service** - Stock price data integration
@@ -252,7 +257,7 @@ When enabled, the terminal automatically fetches new articles every 60 seconds u
 ### Data Flow
 1. User enters ticker symbol
 2. Entity lookup via Knowledge Graph API
-3. Parallel topic-based searches (28+ queries)
+3. Parallel topic-based searches (one Bigdata ``/search`` call per topic template; default list length is defined in ``config/topics.py``)
 4. AI query reformulation for expanded coverage
 5. Semantic deduplication of results
 6. Relevance scoring and ranking
@@ -270,48 +275,39 @@ Environment variables in `.env`:
 ```env
 BIGDATA_API_KEY=your_api_key_here
 
-# Optional: Gemini AI authentication (choose one method)
-# Method 1: ADC - Application Default Credentials (recommended for Google Cloud)
-USE_ADC=true
+# Optional: Gemini — use EITHER Vertex (below) OR AI Studio API key, not both.
+# Vertex (recommended for GCP): see env_example.txt for full matrix.
 
-# Method 2: API Key (simple, for local development)
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Method 3: Vertex AI with service account
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+# Vertex + Application Default Credentials (local: gcloud auth application-default login)
+GOOGLE_GENAI_USE_VERTEXAI=True
 GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+
+# AI Studio (Gemini API key) — set GOOGLE_GENAI_USE_VERTEXAI=False or unset
+# GEMINI_API_KEY=your_gemini_api_key_here
+
+# Vertex + service account JSON instead of ADC
+# GOOGLE_GENAI_USE_VERTEXAI=True
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+# GOOGLE_CLOUD_PROJECT=your-project-id
 ```
+
+### Default topics and ``DEFAULT_TOPICS_REVISION``
+
+The web UI loads default topic templates from ``GET /api/config`` and caches them in ``localStorage``. When you **add, remove, reorder, or edit** entries in ``DEFAULT_TOPICS`` inside ``config/topics.py``, you **must** increment ``DEFAULT_TOPICS_REVISION`` in the same file so existing browsers replace stale cached topics on the next visit.
+
+The API always returns ``default_topics_revision`` as an integer **≥ 1** (``safe_default_topics_revision()`` in ``config/topics.py``). The browser also accepts a numeric string from older proxies. If ``newsTerminalSettings`` JSON is corrupt, it is archived under ``newsTerminalSettings__corrupt__<timestamp>``, the bad key is removed, and defaults are written once—other preferences are not read from the broken blob, but the app returns to a consistent first-run state instead of failing every load.
+
+Category slugs returned by ``get_topic_category()`` were renamed (for example ``earnings`` → ``financial_metrics``). If you persist old slugs elsewhere, use ``normalize_topic_category_slug()`` from ``config.topics`` to map them to the current keys.
 
 ### Gemini AI Setup (Optional)
 
-The application includes an AI-powered query reformulation service using Google's Gemini. Three authentication methods are supported:
+Commentary and optional query reformulation use ``services/gemini_service.py``. Resolution order is documented in that module; in short:
 
-**Method 1: ADC - Application Default Credentials (Recommended for Google Cloud)**
+- **Vertex:** set ``GOOGLE_GENAI_USE_VERTEXAI=true`` and ``GOOGLE_CLOUD_PROJECT`` (and usually ``GOOGLE_CLOUD_LOCATION``). Use a service account JSON path **or** Application Default Credentials.
+- **AI Studio:** set ``GEMINI_API_KEY`` and do **not** force Vertex (Vertex rejects API keys on ``aiplatform.googleapis.com``).
 
-Best for environments where credentials are automatically available (Google Cloud, authenticated gcloud CLI):
-```bash
-echo "USE_ADC=true" >> .env
-```
-
-This uses `HttpOptions` to automatically detect credentials from:
-- `gcloud auth application-default login` (local development)
-- GCP metadata service (Cloud Run, GKE, Compute Engine)
-- `GOOGLE_APPLICATION_CREDENTIALS` environment variable
-
-**Method 2: API Key (Simple)**
-```bash
-echo "GEMINI_API_KEY=your_api_key_here" >> .env
-```
-
-**Method 3: Vertex AI with Service Account**
-1. Place your service account JSON file in the project directory
-2. Set environment variables:
-   ```bash
-   export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
-   export GOOGLE_CLOUD_PROJECT="your-project-id"
-   ```
-
-For detailed Vertex AI setup instructions, see [docs/VERTEX_AI_SETUP.md](docs/VERTEX_AI_SETUP.md).
+See ``env_example.txt`` for a copy-paste template.
 
 ## Performance
 
@@ -337,14 +333,17 @@ For detailed Vertex AI setup instructions, see [docs/VERTEX_AI_SETUP.md](docs/VE
 - **Python 3.11+** - Required runtime
 - **UV** - Fast Python package manager
 - **Docker** - Containerization
+- **Pytest** - ``uv sync --extra dev`` then ``uv run pytest``
 
 ## Troubleshooting
 
 ### Common Issues
 
-**"API key not configured"**
-- Ensure both `BIGDATA_API_KEY` and `GEMINI_API_KEY` are set in `.env`
-- For Vertex AI: Verify `GOOGLE_APPLICATION_CREDENTIALS` path is correct
+**"API key not configured" / Gemini 401 on Vertex**
+- ``BIGDATA_API_KEY`` is always required for news search.
+- For **Vertex**, use OAuth (service account file or ``gcloud auth application-default login``); do not rely on ``GEMINI_API_KEY`` while ``GOOGLE_GENAI_USE_VERTEXAI=true``.
+- For **AI Studio**, set ``GEMINI_API_KEY`` and disable Vertex for that environment.
+- If ``GOOGLE_APPLICATION_CREDENTIALS`` points to a missing file, the app logs a warning and falls back to ADC; fix the path if you intended to use that service account.
 
 **"No articles found"**
 - Verify ticker symbol is valid (e.g., `AAPL` not `Apple`)
@@ -400,10 +399,9 @@ curl http://localhost:8000/api/cache/stats
 
 ## Documentation
 
-- [CLI Report Generator](docs/CLI_REPORT_GENERATOR.md) - Complete CLI reference
-- [CLI Tools](docs/CLI_TOOLS.md) - All command-line tools
-- [Vertex AI Setup](docs/VERTEX_AI_SETUP.md) - Google Cloud AI configuration
-- [API Developer Guide](docs/BIGDATA_API_DEVELOPER_GUIDE.md) - Bigdata.com API reference
+- ``env_example.txt`` - Environment template (including Vertex vs API key)
+- ``services/gemini_service.py`` - Gemini / Vertex authentication behavior
+- In-repo references such as ``docs/CLI_TOOLS.md`` may be added separately; if missing, use script ``--help`` output.
 
 ## License
 
@@ -412,7 +410,7 @@ MIT License
 ## Contributing
 
 This is a production-ready financial news platform. Contributions welcome for:
-- Additional search topics and configurations
+- Additional search topics and configurations (remember to bump ``DEFAULT_TOPICS_REVISION`` in ``config/topics.py`` when editing ``DEFAULT_TOPICS``)
 - Enhanced AI prompts for better commentary
 - UI/UX improvements
 - Performance optimizations

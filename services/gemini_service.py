@@ -3,22 +3,23 @@ Gemini AI Service for structured content generation.
 
 This service provides async methods to interact with Google's Gemini API,
 with support for structured output using JSON schemas.
-Supports multiple authentication methods:
-1. API key authentication
-2. Vertex AI service account authentication  
-3. Application Default Credentials (ADC) - recommended for Google Cloud environments
+Authentication is driven by environment variables; see ``GeminiService`` docstring.
 """
 
 import asyncio
+import logging
 import os
 from typing import Any, Type, TypeVar, Optional
 from functools import wraps
 
+import google.auth
 import google.genai as genai
 from google.genai import types
 from google.oauth2 import service_account
 from pydantic import BaseModel
 
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -30,11 +31,13 @@ class GeminiService:
     Supports structured output generation using Pydantic models
     or custom JSON schemas.
     
-    Supports three authentication methods:
-    1. ADC (Application Default Credentials): Uses HttpOptions with auto-detected credentials.
-       Enable via use_adc=True or USE_ADC=true env var.
-    2. Vertex AI: Service account authentication using credentials file.
-    3. API Key: Traditional authentication using GEMINI_API_KEY.
+    Supports these authentication modes (see ``__init__`` resolution order):
+    1. **Vertex AI** when ``GOOGLE_GENAI_USE_VERTEXAI=true`` (OAuth2 only — not API keys):
+       - If ``GOOGLE_APPLICATION_CREDENTIALS`` points to a service account JSON file, use it.
+       - Otherwise use Application Default Credentials (``gcloud auth application-default login``
+         or a GCP metadata identity).
+    2. **AI Studio / Gemini API key** via ``GEMINI_API_KEY`` when Vertex is not enabled.
+    3. **Legacy USE_ADC** without Vertex: ``genai.Client(http_options=...)`` (non-Vertex flows).
     """
     
     def __init__(
@@ -56,37 +59,54 @@ class GeminiService:
                                  If not provided, will use GOOGLE_APPLICATION_CREDENTIALS env var.
             project_id: Google Cloud project ID for Vertex AI.
                        If not provided, will use GOOGLE_CLOUD_PROJECT env var.
-            location: Google Cloud region for Vertex AI. Defaults to us-central1.
+            location: Google Cloud region for Vertex AI. Defaults to us-central1;
+                      ``GOOGLE_CLOUD_LOCATION`` overrides when set.
             model: Model to use for generation. Defaults to gemini-2.5-flash.
             use_adc: Use Application Default Credentials (ADC). Set to True for Google Cloud
-                    environments where credentials are automatically available.
-            api_version: API version to use with ADC. Defaults to "v1".
+                    environments where credentials are automatically available (non-Vertex).
+            api_version: API version to use with legacy ADC HttpOptions path. Defaults to "v1".
         
-        Authentication priority:
-        1. If use_adc=True, use Application Default Credentials with HttpOptions
-        2. If service_account_path is provided, use Vertex AI authentication
-        3. Otherwise, use API key authentication
+        Resolution order:
+        1. ``GOOGLE_GENAI_USE_VERTEXAI=true`` → Vertex (service account file if present, else ADC).
+        2. ``USE_ADC=true`` (without Vertex) → HttpOptions / non-Vertex client.
+        3. ``GOOGLE_APPLICATION_CREDENTIALS`` file exists → Vertex with that service account.
+        4. Else → ``GEMINI_API_KEY`` (AI Studio); fails if missing.
         """
         self.model = model
-        self.location = location
+        self.location = os.getenv("GOOGLE_CLOUD_LOCATION", location)
         self.api_version = api_version
-        
-        # Check environment variable for ADC preference
-        use_adc = use_adc or os.getenv('USE_ADC', '').lower() in ('true', '1', 'yes')
-        
-        if use_adc:
-            # Use Application Default Credentials
-            self._init_adc(api_version)
-        else:
-            # Determine authentication method
-            service_account_file = service_account_path or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            
+
+        use_vertex_env = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1", "yes")
+        use_adc_env = bool(use_adc) or os.getenv("USE_ADC", "").lower() in ("true", "1", "yes")
+        service_account_file = service_account_path or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+        if use_vertex_env:
+            project = project_id or os.getenv("GOOGLE_CLOUD_PROJECT")
+            if not project:
+                raise ValueError(
+                    "Vertex AI is enabled (GOOGLE_GENAI_USE_VERTEXAI=true) but GOOGLE_CLOUD_PROJECT "
+                    "is not set. Set it to your GCP project id."
+                )
             if service_account_file:
-                # Use Vertex AI authentication
-                self._init_vertex_ai(service_account_file, project_id)
+                if os.path.exists(service_account_file):
+                    self._init_vertex_ai(service_account_file, project)
+                else:
+                    logger.warning(
+                        "GOOGLE_APPLICATION_CREDENTIALS points to a missing file (%s); "
+                        "using Vertex AI with Application Default Credentials instead.",
+                        service_account_file,
+                    )
+                    self._init_vertex_ai_adc(project)
             else:
-                # Use API key authentication
-                self._init_api_key(api_key)
+                self._init_vertex_ai_adc(project)
+        elif use_adc_env:
+            self._init_adc(api_version)
+        elif service_account_file and os.path.exists(service_account_file):
+            self._init_vertex_ai(service_account_file, project_id)
+        else:
+            self._init_api_key(api_key)
+
+        logger.info("GeminiService initialized (auth=%s)", getattr(self, "auth_method", "unknown"))
     
     def _init_adc(self, api_version: str = "v1"):
         """Initialize client with Application Default Credentials (ADC).
@@ -138,6 +158,26 @@ class GeminiService:
             project=project_id,
             location=self.location,
             credentials=credentials
+        )
+
+    def _init_vertex_ai_adc(self, project_id: str) -> None:
+        """Vertex AI using Application Default Credentials (no service account JSON path)."""
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        self.project_id = project_id
+        self.credentials = credentials
+        self.auth_method = "vertex_ai_adc"
+        self.client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=self.location,
+            credentials=credentials,
+        )
+        logger.info(
+            "Gemini Vertex client using ADC (project=%s, location=%s)",
+            project_id,
+            self.location,
         )
     
     def _init_api_key(self, api_key: Optional[str] = None):

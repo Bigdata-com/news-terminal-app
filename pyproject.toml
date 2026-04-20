@@ -19,6 +19,15 @@ dependencies = [
     "google-auth>=2.30.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -72,8 +72,8 @@ class TopicSearchService:
     Service for performing topic-based news searches.
     
     Features:
-    - Always runs baseline company search (no sentiment filter)
-    - Runs 27 topic searches in parallel (with sentiment filter)
+    - Optional baseline entity-only search (no sentiment filter)
+    - Parallel topic searches (one API call per topic template; sentiment filter on topic queries)
     - Rate limiting to respect 500 RPM API limit
     - Caching of company data (entity IDs and names)
     - Shared HTTP session for connection pooling (much faster!)
@@ -133,10 +133,12 @@ class TopicSearchService:
             except ValueError as e:
                 logger.error(f"Failed to initialize GeminiService: {e}")
                 raise ValueError(
-                    "Query reformulation requires either:\n"
-                    "  1. GOOGLE_APPLICATION_CREDENTIALS env var (for Vertex AI), or\n"
-                    "  2. GEMINI_API_KEY env var (for API key authentication).\n"
-                    "Please set one of these or disable query reformulation."
+                    "Query reformulation requires Gemini auth. Configure one of:\n"
+                    "  1. Vertex: GOOGLE_GENAI_USE_VERTEXAI=true, GOOGLE_CLOUD_PROJECT, and either "
+                    "GOOGLE_APPLICATION_CREDENTIALS (JSON) or Application Default Credentials "
+                    "(e.g. gcloud auth application-default login), or\n"
+                    "  2. AI Studio: GEMINI_API_KEY (with Vertex env vars unset or false).\n"
+                    "Or disable query reformulation."
                 ) from e
         return self._gemini_service
     

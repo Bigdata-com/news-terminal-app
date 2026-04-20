@@ -71,34 +71,9 @@ class ReportService:
         self.prompts = self._load_prompts()
     
     def _create_gemini_service(self) -> GeminiService:
-        """Create a GeminiService instance from environment variables."""
-        use_adc = os.getenv('USE_ADC', '').lower() in ('true', '1', 'yes')
-        service_account_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        api_key = os.getenv('GEMINI_API_KEY')
-        
-        if use_adc:
-            logger.info("Creating GeminiService with Application Default Credentials (ADC)")
-            return GeminiService(
-                use_adc=True,
-                model="gemini-2.5-flash"
-            )
-        elif service_account_path:
-            logger.info("Creating GeminiService with Vertex AI authentication")
-            return GeminiService(
-                service_account_path=service_account_path,
-                model="gemini-2.5-flash"
-            )
-        elif api_key:
-            logger.info("Creating GeminiService with API key authentication")
-            return GeminiService(
-                api_key=api_key,
-                model="gemini-2.5-flash"
-            )
-        else:
-            raise ValueError(
-                "No Gemini authentication configured. Set USE_ADC=true, "
-                "GOOGLE_APPLICATION_CREDENTIALS, or GEMINI_API_KEY"
-            )
+        """Create a GeminiService from environment (see ``GeminiService`` for resolution order)."""
+        logger.info("Creating GeminiService from environment variables")
+        return GeminiService(model="gemini-2.5-flash")
     
     def _load_prompts(self) -> Dict[str, Any]:
         """Load prompt templates from YAML file."""

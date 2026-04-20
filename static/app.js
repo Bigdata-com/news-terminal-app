@@ -5,6 +5,13 @@ let previousArticleIds = new Set(); // Track previously seen articles
 
 // Default topics list - will be loaded from backend
 let DEFAULT_TOPICS = [];
+/** True after /api/config returns a non-empty default_topics list. */
+let defaultTopicsConfigLoadedOk = false;
+/**
+ * Integer revision from /api/config (>=1), or null if missing/invalid/unloaded.
+ * Do not run localStorage topic sync when null — avoids wiping topics on config errors.
+ */
+let defaultTopicsRevisionFromServer = null;
 
 // Settings object (default: 7 days, Topics ON, Reformulation OFF)
 let searchSettings = {
@@ -928,7 +935,7 @@ async function generateCommentary() {
         // Provide helpful error message for timeouts
         let errorMessage = error.message;
         if (error.message.includes('timeout')) {
-            errorMessage = 'Request timed out. For large topic searches (26 topics with reformulation), this can take 3-5 minutes. Try reducing the number of topics or disabling query reformulation, or wait a bit longer and try clicking RUN again.';
+            errorMessage = 'Request timed out. For large topic searches (many topics with reformulation), this can take 3-5 minutes. Try reducing the number of topics or disabling query reformulation, or wait a bit longer and try clicking RUN again.';
         }
         
         showCommentaryError(errorMessage);
@@ -1163,15 +1170,82 @@ checkHealth();
 // SETTINGS FUNCTIONS
 // ============================================================================
 
+const LOCAL_STORAGE_SETTINGS_KEY = 'newsTerminalSettings';
+/** Prior corrupt payloads are archived under this prefix (one newest backup at a time). */
+const LOCAL_STORAGE_CORRUPT_PREFIX = 'newsTerminalSettings__corrupt__';
+
+/**
+ * Coerce /api/config default_topics_revision to a finite integer >= 1, or null.
+ * Accepts JSON numbers or numeric strings (e.g. "2").
+ */
+function normalizeServerTopicsRevision(rev) {
+    if (typeof rev === 'number' && Number.isFinite(rev) && rev >= 1) {
+        return Math.floor(rev);
+    }
+    if (typeof rev === 'string' && rev.trim() !== '') {
+        const n = Number(rev.trim());
+        if (Number.isFinite(n) && n >= 1) {
+            return Math.floor(n);
+        }
+    }
+    return null;
+}
+
+/** First-run defaults; topic revision is set only when /api/config loaded successfully. */
+function buildDefaultSearchSettings() {
+    const s = {
+        allNews: false,
+        topics: [...DEFAULT_TOPICS],
+        days: 7,
+        queryReformulation: false,
+        autoRefresh: false
+    };
+    if (defaultTopicsConfigLoadedOk && defaultTopicsRevisionFromServer != null) {
+        s.defaultTopicsRevision = defaultTopicsRevisionFromServer;
+    }
+    return s;
+}
+
+/** Keep a single archived copy so a bad JSON blob does not fill storage. */
+function archiveCorruptSettingsSnapshot(raw) {
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > 100000) {
+        return;
+    }
+    try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(LOCAL_STORAGE_CORRUPT_PREFIX)) {
+                localStorage.removeItem(k);
+            }
+        }
+        localStorage.setItem(LOCAL_STORAGE_CORRUPT_PREFIX + Date.now(), raw);
+    } catch (err) {
+        console.warn('Could not archive corrupt settings:', err);
+    }
+}
+
 async function loadDefaultTopics() {
     // Load default topics from backend
+    defaultTopicsConfigLoadedOk = false;
+    defaultTopicsRevisionFromServer = null;
     try {
         const response = await fetch('/api/config');
         const data = await response.json();
         
-        if (response.ok && data.default_topics) {
+        if (
+            response.ok &&
+            data.default_topics &&
+            Array.isArray(data.default_topics) &&
+            data.default_topics.length > 0
+        ) {
             DEFAULT_TOPICS = data.default_topics;
-            console.log(`Loaded ${DEFAULT_TOPICS.length} default topics from backend`);
+            defaultTopicsRevisionFromServer = normalizeServerTopicsRevision(data.default_topics_revision);
+            defaultTopicsConfigLoadedOk = true;
+            console.log(
+                `Loaded ${DEFAULT_TOPICS.length} default topics from backend (revision ${
+                    defaultTopicsRevisionFromServer ?? 'none'
+                })`
+            );
         } else {
             console.error('Failed to load default topics from backend');
             // Fallback to minimal topics if backend fails
@@ -1190,15 +1264,37 @@ async function loadDefaultTopics() {
     }
 }
 
+function syncStoredTopicsToServerRevision() {
+    if (!defaultTopicsConfigLoadedOk || defaultTopicsRevisionFromServer == null) {
+        return;
+    }
+    const serverRev = defaultTopicsRevisionFromServer;
+    if (searchSettings.defaultTopicsRevision === serverRev) {
+        return;
+    }
+    searchSettings.topics = [...DEFAULT_TOPICS];
+    searchSettings.defaultTopicsRevision = serverRev;
+    saveSettingsToStorage();
+    console.log(
+        'Replaced cached topics with server defaults (revision ' +
+            serverRev +
+            '). Clear localStorage or use Reset if you need to force-refresh again.'
+    );
+}
+
 function loadSettings() {
     // Load settings from localStorage
-    const saved = localStorage.getItem('newsTerminalSettings');
+    const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
     if (saved) {
         try {
             searchSettings = JSON.parse(saved);
             // Ensure topics array exists and is populated
             if (!searchSettings.topics || searchSettings.topics.length === 0) {
                 searchSettings.topics = [...DEFAULT_TOPICS];
+                if (defaultTopicsConfigLoadedOk && defaultTopicsRevisionFromServer != null) {
+                    searchSettings.defaultTopicsRevision = defaultTopicsRevisionFromServer;
+                }
+                saveSettingsToStorage();
             } else {
                 // Check if topics are in old string format and convert to new dict format
                 const hasOldFormat = searchSettings.topics.some(t => typeof t === 'string');
@@ -1206,9 +1302,14 @@ function loadSettings() {
                     console.log('Converting old string topics to new dictionary format...');
                     // Clear old topics and use new defaults
                     searchSettings.topics = [...DEFAULT_TOPICS];
+                    if (defaultTopicsConfigLoadedOk && defaultTopicsRevisionFromServer != null) {
+                        searchSettings.defaultTopicsRevision = defaultTopicsRevisionFromServer;
+                    }
                     saveSettingsToStorage(); // Save the updated format
                 }
             }
+            // Replace localStorage topics when server default set changed (topics.py revision bump)
+            syncStoredTopicsToServerRevision();
             // Ensure days field exists (default 7)
             if (!searchSettings.days) {
                 searchSettings.days = 7;
@@ -1223,28 +1324,29 @@ function loadSettings() {
             }
         } catch (e) {
             console.error('Error loading settings:', e);
-            searchSettings = {
-                allNews: false,
-                topics: [...DEFAULT_TOPICS],
-                days: 7,
-                queryReformulation: false,
-                autoRefresh: false
-            };
+            archiveCorruptSettingsSnapshot(saved);
+            try {
+                localStorage.removeItem(LOCAL_STORAGE_SETTINGS_KEY);
+            } catch (removeErr) {
+                console.warn('Could not remove corrupt settings key:', removeErr);
+            }
+            searchSettings = buildDefaultSearchSettings();
+            saveSettingsToStorage();
+            console.warn(
+                'newsTerminalSettings contained invalid JSON; reset to defaults. ' +
+                    'A copy was saved under ' +
+                    LOCAL_STORAGE_CORRUPT_PREFIX +
+                    '<timestamp> in localStorage when possible.'
+            );
         }
     } else {
         // No saved settings - use defaults (7 days, Topics ON, Reformulation OFF, Auto-refresh OFF)
-        searchSettings = {
-            allNews: false,  // false means selective is ON
-            topics: [...DEFAULT_TOPICS],
-            days: 7,
-            queryReformulation: false,
-            autoRefresh: false
-        };
+        searchSettings = buildDefaultSearchSettings();
     }
 }
 
 function saveSettingsToStorage() {
-    localStorage.setItem('newsTerminalSettings', JSON.stringify(searchSettings));
+    localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(searchSettings));
 }
 
 function parseUrlParameters() {
@@ -1592,6 +1694,12 @@ function updateTopicsCount() {
 function resetTopicsToDefault() {
     if (confirm('Reset topics to defaults?')) {
         searchSettings.topics = [...DEFAULT_TOPICS];
+        if (defaultTopicsRevisionFromServer != null) {
+            searchSettings.defaultTopicsRevision = defaultTopicsRevisionFromServer;
+        } else {
+            delete searchSettings.defaultTopicsRevision;
+        }
+        saveSettingsToStorage();
         renderTopicsInputList();
         updateTopicsCount();
         showNotification('Topics reset to defaults');
