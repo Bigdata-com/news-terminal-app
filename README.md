@@ -11,6 +11,17 @@ Professional financial news platform with AI-powered commentary generation and m
 - 🔄 Auto-refresh functionality
 - 🎯 Topic-based news aggregation with relevance scoring
 
+Two terminals share the same backend and styling:
+
+| Page | Scope | Search |
+|------|-------|--------|
+| `/` | Company desk — one or more tickers | Entity-filtered, `{company}` substituted into each topic |
+| `/sector` | Sector desk — one theme, no ticker | Theme-only, no entity filter, phrases sent verbatim |
+
+The sector page ships with an Energy desk (15 editable phrases covering crude, OPEC+, refining, gas
+and LNG, freight, sanctions and policy). Additional sector tiles are registered but disabled until
+their topic sets are defined.
+
 ### AI-Powered Report Generation
 - 📊 **Executive Briefs** - Concise bullet points (one per topic) for quick review
 - 📝 **Wall Street Desk Notes** - Professional analyst-style commentary
@@ -41,12 +52,15 @@ news_terminal/
 │   └── cli_entity_search.py
 ├── config/                 # Configuration
 │   ├── prompts.yaml        # AI prompt templates
-│   └── topics.py           # Search topics & ``DEFAULT_TOPICS_REVISION``
-├── tests/                  # Pytest (Gemini auth, topics, CLI helpers)
+│   ├── topics.py           # Company topics & ``DEFAULT_TOPICS_REVISION``
+│   └── sector_topics.py    # Sector registry, theme phrases & ``SECTOR_TOPICS_REVISION``
+├── tests/                  # Pytest (Gemini auth, topics, search service, CLI helpers)
 ├── static/                 # Web UI assets
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
+│   ├── index.html          # Company terminal (/)
+│   ├── sector.html         # Sector terminal (/sector)
+│   ├── style.css           # Shared styles for both terminals
+│   ├── app.js              # Company terminal logic
+│   └── sector.js           # Sector terminal logic
 ├── docs/                   # Documentation
 ├── output/                 # Generated reports
 ├── pyproject.toml          # Dependencies
@@ -186,9 +200,12 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 
 ## API Endpoints
 
-- `GET /` - Terminal interface
+- `GET /` - Company terminal interface
+- `GET /sector` - Sector terminal interface
 - `POST /api/news/{ticker}` - Get news for a single ticker (JSON body)
 - `POST /api/news-multi` - Get news for multiple tickers (JSON body)
+- `GET /api/sectors` - Sector tiles, per-sector default topics, ``sector_topics_revision``, and expansion availability
+- `POST /api/sector-news` - Get theme news for a sector (JSON body, no ticker involved)
 - `GET /api/health` - Health check
 - `GET /api/config` - Default topics, ``default_topics_revision``, and commentary availability
 - `GET /api/cache/stats` - Cache statistics
@@ -214,12 +231,58 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 
 Omit ``topics`` to use the server default list from ``config/topics.py`` (currently ~29 topic rows). For multi-ticker requests, add `"tickers": ["AAPL", "TSLA", "NVDA"]` to the body.
 
+### Sector News Request Body
+
+```json
+{
+  "sector": "energy",
+  "days": 7,
+  "relevance": 0.1,
+  "since_minutes": null,
+  "query_reformulation": false,
+  "topics": [
+    {
+      "topic_name": "Crude Prices",
+      "topic_text": "Brent and WTI crude oil prices rise or fall on shifting supply and demand outlook"
+    }
+  ]
+}
+```
+
+Sector phrases carry **no** ``{company}`` placeholder — they are sent to the Search API verbatim with
+no entity filter. Omit ``topics`` to use that sector's defaults from ``config/sector_topics.py``.
+Unknown or not-yet-enabled sector ids return ``404``.
+
 ## Usage
+
+### Company terminal (`/`)
 
 1. Enter any stock ticker symbol (e.g., AAPL, MSFT, GOOGL)
 2. Click "GET NEWS" or press Enter
 3. View real-time financial news in the terminal interface
 4. News auto-refreshes every 1 minute (if enabled)
+
+### Sector terminal (`/sector`)
+
+1. Click a sector tile (Energy is enabled; others are dimmed until their topics are defined)
+2. The feed loads immediately, grouped into one tab per topic
+3. Use "Edit Topics" to rename, reword, add or remove search phrases — they persist in ``localStorage``
+4. Use the date range buttons to widen or narrow the lookback window
+5. Tick "AI Query Expansion" to run 3 extra AI-written phrasings per topic (4x queries)
+
+Both pages accept URL parameters, so a demo can be opened in a preconfigured state:
+
+| Parameter | Pages | Effect |
+|---|---|---|
+| `?autoRefresh=true` | `/` and `/sector` | Refresh the feed automatically (every 60 seconds on `/`, every 5 minutes on `/sector`) |
+| `?expand=true` | `/sector` | Enable AI query expansion |
+
+Parameters are written to ``localStorage``, so they persist after the query string is dropped. On
+`/sector`, a green **LIVE** pill appears whenever auto-refresh is armed; refreshes only request the
+minutes since the last fetch, merge into the existing feed, and flash newly arrived articles with a
+`NEW` badge while keeping your scroll position. Expansion is skipped on background refreshes to avoid
+an extra Gemini round trip on every automated refresh. The cadence for `/sector` is a single constant,
+`AUTO_REFRESH_MS` in `static/sector.js`.
 
 ### Auto-Refresh
 
@@ -255,6 +318,8 @@ When enabled, the terminal automatically fetches new articles every 60 seconds u
 - **Rich Visualizations** - Article relevance scoring and topic grouping
 
 ### Data Flow
+
+Company search (`/`):
 1. User enters ticker symbol
 2. Entity lookup via Knowledge Graph API
 3. Parallel topic-based searches (one Bigdata ``/search`` call per topic template; default list length is defined in ``config/topics.py``)
@@ -262,6 +327,12 @@ When enabled, the terminal automatically fetches new articles every 60 seconds u
 5. Semantic deduplication of results
 6. Relevance scoring and ranking
 7. Optional: AI commentary generation
+
+Sector search (`/sector`) skips steps 2 and 4 — there is no entity to resolve, so each phrase is sent
+verbatim as its own ``/search`` call with no ``entity`` filter. Both paths share the same request
+builder (``_build_filters``), transport (``_post_search``) and article formatter (``_format_article``)
+in ``services/topic_search_service.py``, so the chunk budget, rate limiting and deduplication behave
+identically.
 
 ### Deployment
 - **Docker-Ready** - Single container with all dependencies
@@ -295,6 +366,30 @@ GOOGLE_CLOUD_LOCATION=us-central1
 ### Default topics and ``DEFAULT_TOPICS_REVISION``
 
 The web UI loads default topic templates from ``GET /api/config`` and caches them in ``localStorage``. When you **add, remove, reorder, or edit** entries in ``DEFAULT_TOPICS`` inside ``config/topics.py``, you **must** increment ``DEFAULT_TOPICS_REVISION`` in the same file so existing browsers replace stale cached topics on the next visit.
+
+### Sector topics and ``SECTOR_TOPICS_REVISION``
+
+``config/sector_topics.py`` follows the same rule for the sector terminal: the page loads defaults from
+``GET /api/sectors`` and caches them under the ``sectorTerminalSettings`` key. When you **add, remove,
+reorder, or edit** any sector's topic list, increment ``SECTOR_TOPICS_REVISION`` so browsers holding
+stale phrases pick up the new defaults.
+
+To enable one of the placeholder sectors, define its phrase list, flip ``enabled`` to ``True`` in the
+``SECTORS`` registry, and bump the revision. Sector phrases must not contain ``{company}`` — there is no
+entity to substitute, so the placeholder would be searched literally (the UI rejects it on save).
+
+### Per-sector AI query expansion prompts
+
+Each sector carries its own ``expansion_prompt`` alongside its topics. A generic "reword this query"
+instruction mostly yields synonym swaps; naming the desk's benchmarks, venues and units makes the
+variations retrieve genuinely different documents. ``ENERGY_EXPANSION_PROMPT`` supplies crude and
+products vocabulary (Brent/WTI/Dubai, OPEC+ quotas and spare capacity, crack spreads, refinery
+turnarounds, VLCC and Suezmax freight, Hormuz and Red Sea chokepoints, EIA/IEA reports, Cushing and ARA
+inventories, TTF/Henry Hub/JKM, sanctions and price caps, FIDs and upstream capex).
+
+Expansion prompts are server-side only and are never sent to the browser. A sector enabled without a
+bespoke prompt falls back to a generated sector-level prompt, and a Gemini failure degrades to
+searching the original phrases rather than failing the request.
 
 The API always returns ``default_topics_revision`` as an integer **≥ 1** (``safe_default_topics_revision()`` in ``config/topics.py``). The browser also accepts a numeric string from older proxies. If ``newsTerminalSettings`` JSON is corrupt, it is archived under ``newsTerminalSettings__corrupt__<timestamp>``, the bad key is removed, and defaults are written once—other preferences are not read from the broken blob, but the app returns to a consistent first-run state instead of failing every load.
 
@@ -410,7 +505,8 @@ MIT License
 ## Contributing
 
 This is a production-ready financial news platform. Contributions welcome for:
-- Additional search topics and configurations (remember to bump ``DEFAULT_TOPICS_REVISION`` in ``config/topics.py`` when editing ``DEFAULT_TOPICS``)
+- Additional search topics and configurations (remember to bump ``DEFAULT_TOPICS_REVISION`` in ``config/topics.py`` when editing ``DEFAULT_TOPICS``, or ``SECTOR_TOPICS_REVISION`` in ``config/sector_topics.py`` when editing sector phrases)
+- New sector desks (define the phrase list, enable the tile in ``SECTORS``, bump the revision)
 - Enhanced AI prompts for better commentary
 - UI/UX improvements
 - Performance optimizations

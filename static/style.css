@@ -1723,3 +1723,240 @@ button:focus,
     }
 }
 
+/* ============================================================
+   HEADER NAV (shared by company and sector terminals)
+   ============================================================ */
+
+.terminal-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.terminal-nav-link {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #8b949e;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.terminal-nav-link:hover {
+    color: #58a6ff;
+    background: rgba(88, 166, 255, 0.08);
+}
+
+.terminal-nav-link.active {
+    color: #58a6ff;
+    border-color: #58a6ff;
+    font-weight: 600;
+}
+
+/* ============================================================
+   SECTOR TILES
+   ============================================================ */
+
+.sector-tiles-bar {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    background: #161b22;
+    border-bottom: 1px solid #21262d;
+}
+
+.sector-tiles-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #8b949e;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    padding-top: 10px;
+}
+
+.sector-tiles {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.sector-tiles-loading {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 11px;
+    color: #6e7681;
+    padding: 10px 0;
+}
+
+.sector-tile {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 14px;
+    min-width: 170px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.sector-tile:hover:not(.disabled) {
+    border-color: #58a6ff;
+    background: rgba(88, 166, 255, 0.05);
+    transform: translateY(-1px);
+}
+
+.sector-tile.active {
+    border: 2px solid #58a6ff;
+    background: rgba(88, 166, 255, 0.08);
+    padding: 9px 13px; /* Offset the thicker border so tiles stay aligned */
+}
+
+.sector-tile.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.sector-tile-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #c9d1d9;
+    letter-spacing: -0.1px;
+}
+
+.sector-tile.active .sector-tile-label {
+    color: #58a6ff;
+}
+
+.sector-tile-desc {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10px;
+    color: #8b949e;
+    margin-top: 3px;
+    line-height: 1.4;
+    max-width: 220px;
+}
+
+.sector-tile-meta {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 9px;
+    color: #6e7681;
+    margin-top: 6px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.active-sector-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: #58a6ff;
+    white-space: nowrap;
+}
+
+/* Auto-refresh status pill */
+.live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    color: #6e7681;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+.live-indicator .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6e7681;
+}
+
+/* Armed = interval actually running, not just enabled in settings */
+.live-indicator.armed {
+    color: #3fb950;
+    border-color: rgba(63, 185, 80, 0.4);
+}
+
+.live-indicator.armed .live-dot {
+    background: #3fb950;
+    animation: livePulse 2s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5);
+    }
+    50% {
+        opacity: 0.6;
+        box-shadow: 0 0 0 4px rgba(63, 185, 80, 0);
+    }
+}
+
+/* ============================================================
+   SECTOR FEED TABLE COLUMNS
+   ============================================================ */
+
+.col-sector {
+    width: 90px;
+    min-width: 90px;
+    padding-right: 8px;
+}
+
+.col-source {
+    width: 140px;
+    min-width: 140px;
+    padding-right: 8px;
+}
+
+.news-row-sector {
+    width: 90px;
+    min-width: 90px;
+    padding-right: 8px;
+}
+
+.news-row-source {
+    width: 140px;
+    min-width: 140px;
+    padding-right: 8px;
+    color: #8b949e;
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .sector-tiles-bar {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .sector-tiles-label {
+        padding-top: 0;
+    }
+
+    .sector-tile {
+        min-width: 140px;
+    }
+
+    .col-source,
+    .news-row-source {
+        display: none;
+    }
+}
+

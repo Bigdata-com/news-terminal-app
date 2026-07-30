@@ -22,6 +22,14 @@ from services import price_service
 from services.topic_search_service import TopicSearchService
 from services.report_service import ReportService
 from config.topics import DEFAULT_TOPICS, list_available_configs, safe_default_topics_revision
+from config.sector_topics import (
+    UnknownSectorError,
+    default_topics_by_sector,
+    get_sector,
+    get_sector_expansion_prompt,
+    list_sectors,
+    safe_sector_topics_revision,
+)
 
 
 # Pydantic models for request bodies
@@ -37,6 +45,19 @@ class NewsSearchRequest(BaseModel):
     basic_search: bool = Field(default=False, description="If true, use basic search without topics")
     relevance: float = Field(default=0.1, description="Minimum relevance threshold (0.0-1.0)")
     topics: Optional[List[TopicItem]] = Field(default=None, description="Custom topics for search")
+    since_minutes: Optional[int] = Field(default=None, description="For incremental refresh: only fetch last N minutes")
+    query_reformulation: bool = Field(default=False, description="Enable AI query expansion")
+
+
+class SectorNewsRequest(BaseModel):
+    """Request body for the sector (theme) news search endpoint"""
+    sector: str = Field(..., description="Sector identifier, e.g. 'energy'")
+    days: int = Field(default=7, description="Number of days to look back")
+    relevance: float = Field(default=0.1, description="Minimum relevance threshold (0.0-1.0)")
+    topics: Optional[List[TopicItem]] = Field(
+        default=None,
+        description="Custom theme phrases; omit to use the sector defaults"
+    )
     since_minutes: Optional[int] = Field(default=None, description="For incremental refresh: only fetch last N minutes")
     query_reformulation: bool = Field(default=False, description="Enable AI query expansion")
 
@@ -324,25 +345,35 @@ def get_time_ago(timestamp: datetime) -> str:
 
 # API Routes
 
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    """Serve the terminal interface"""
+def serve_static_page(filename: str) -> HTMLResponse:
+    """Serve an HTML page from the static directory, with a friendly fallback."""
     try:
-        with open("static/index.html", "r") as f:
+        with open(f"static/{filename}", "r") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
+        logger.error(f"Static page not found: static/{filename}")
         return HTMLResponse(
-            content="""
+            content=f"""
             <html>
                 <body>
                     <h1>News Terminal</h1>
-                    <p>Frontend not yet deployed. Please create static/index.html</p>
+                    <p>Frontend not yet deployed. Please create static/{filename}</p>
                     <p>API is running at <a href="/docs">/docs</a></p>
                 </body>
             </html>
             """,
             status_code=200
         )
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    """Serve the company terminal interface"""
+    return serve_static_page("index.html")
+
+@app.get("/sector", response_class=HTMLResponse)
+async def sector_page():
+    """Serve the sector terminal interface"""
+    return serve_static_page("sector.html")
 
 @app.post("/api/news/{ticker}")
 async def get_news(
@@ -641,6 +672,95 @@ async def get_news_multi(request: NewsMultiSearchRequest):
         raise
     except Exception as e:
         logger.error(f"Error processing multi-ticker request: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/sectors")
+async def get_sectors():
+    """Get the sector registry plus default theme topics for enabled sectors"""
+    return {
+        "sectors": list_sectors(),
+        "default_topics": default_topics_by_sector(),
+        "sector_topics_revision": safe_sector_topics_revision(),
+        # Same Gemini configuration backs expansion and commentary
+        "query_expansion_available": report_service is not None,
+    }
+
+@app.post("/api/sector-news")
+async def get_sector_news(request: SectorNewsRequest):
+    """
+    Get theme-based news for a sector (no company/entity filter).
+
+    Request body parameters:
+    - sector: Sector identifier from GET /api/sectors (e.g. "energy")
+    - days: Number of days to look back (default: 7)
+    - relevance: Minimum relevance threshold (0.0-1.0)
+    - topics: Array of {topic_name, topic_text} phrases; omit to use sector defaults
+    - since_minutes: If provided, only fetch articles from the last N minutes (incremental refresh)
+    - query_reformulation: If true, generate 3 variations per phrase using the sector's own
+      expansion prompt (4x searches)
+    """
+
+    try:
+        sector = get_sector(request.sector)
+    except UnknownSectorError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    if not topic_search_service:
+        raise HTTPException(status_code=503, detail="Search service not initialized")
+
+    # Custom phrases from the UI take precedence over the server defaults
+    if request.topics:
+        topics = [{"topic_name": t.topic_name, "topic_text": t.topic_text} for t in request.topics]
+        logger.info(f"Using {len(topics)} custom sector topics for {sector['id']}")
+    else:
+        topics = sector["topics"]
+
+    topics = [t for t in topics if t.get("topic_text", "").strip()]
+    if not topics:
+        raise HTTPException(status_code=400, detail="At least one non-empty topic is required")
+
+    # Determine lookback period (use since_minutes for incremental refresh)
+    if request.since_minutes:
+        # Convert minutes to fractional days, with a 1 minute floor to avoid a zero window
+        lookback_days = max(request.since_minutes / (60 * 24), 1 / (60 * 24))
+        logger.info(
+            f"API request for sector news: {sector['id']} "
+            f"(INCREMENTAL: last {request.since_minutes} minutes, {len(topics)} topics)"
+        )
+    else:
+        lookback_days = request.days
+        logger.info(
+            f"API request for sector news: {sector['id']} "
+            f"(FULL: {request.days} days, {len(topics)} topics, expansion={request.query_reformulation})"
+        )
+
+    try:
+        results = await topic_search_service.search_sector(
+            sector["id"],
+            topics,
+            days=lookback_days,
+            min_relevance=request.relevance,
+            sector_label=sector["label"],
+            query_reformulation=request.query_reformulation,
+            expansion_prompt=(
+                get_sector_expansion_prompt(sector["id"]) if request.query_reformulation else ""
+            ),
+        )
+
+        return {
+            **results,
+            "settings": {
+                "days": request.days,
+                "relevance": request.relevance,
+                "topic_count": len(topics),
+                "since_minutes": request.since_minutes,
+                "query_reformulation": request.query_reformulation,
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing sector request for {sector['id']}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/api/search/{query}")

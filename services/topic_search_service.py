@@ -12,8 +12,11 @@ KEY PUBLIC METHODS:
     search_multiple_tickers(): Topic searches for multiple tickers in parallel
     search_baseline(): Entity-filtered search (no topics, no sentiment filter)
     search_single_topic(): Single topic search with sentiment filter
+    search_sector(): Theme-based search for a sector (parallel topics, no entity filter)
+    search_single_theme(): Single theme search with no entity filter
     get_company_data(): Resolve ticker to entity ID via Knowledge Graph API
     generate_topic_variations(): Generate 3 query variations using Gemini AI
+    generate_theme_variations(): Generate 3 sector query variations using a per-sector prompt
     close(): Clean up HTTP session
 
 FEATURES:
@@ -41,6 +44,9 @@ USAGE EXAMPLES:
     # Multiple tickers (topic search)
     all_results = await service.search_multiple_tickers(["AAPL", "GOOGL"], days=7)
     
+    # Sector search (theme queries, no company involved)
+    sector_results = await service.search_sector("energy", ENERGY_TOPICS, days=7)
+    
     await service.close()
 """
 
@@ -58,6 +64,9 @@ from .gemini_service import GeminiService
 from config.topics import DEFAULT_TOPICS
 
 logger = logging.getLogger(__name__)
+
+# Total chunks requested per search, divided across all queries in that search
+TOTAL_CHUNK_BUDGET = 300
 
 
 class TopicVariations(BaseModel):
@@ -206,6 +215,72 @@ Return exactly 3 variations, each as a complete search query."""
             # Return empty list on failure - caller will use original topic only
             return []
     
+    async def generate_theme_variations(
+        self,
+        topic,  # Can be str or dict with topic_text
+        expansion_prompt: str
+    ) -> List[str]:
+        """
+        Generate 3 variations of a sector theme query using Gemini AI.
+        
+        Unlike :meth:`generate_topic_variations`, there is no company to substitute, and the
+        desk-specific guidance comes from the sector's own ``expansion_prompt`` so variations
+        use that market's vocabulary instead of generic financial wording.
+        
+        Args:
+            topic: Theme phrase, or dict with a 'topic_text' key
+            expansion_prompt: Sector-specific instructions from config/sector_topics.py
+            
+        Returns:
+            List of 3 theme variations, or an empty list if generation fails
+        """
+        if isinstance(topic, dict):
+            topic_text = topic.get("topic_text", "")
+        else:
+            topic_text = topic
+        
+        topic_text = topic_text.strip()
+        if not topic_text:
+            return []
+        
+        prompt = f"""{expansion_prompt}
+
+Original search query:
+"{topic_text}"
+
+Generate 3 alternative search queries that would surface additional relevant articles for this desk. \
+Each variation must:
+- Keep the core intent of the original query
+- Approach it from a different angle rather than only swapping synonyms
+- Read as natural language suitable for semantic search, not a keyword list
+- Contain no placeholders and no single company as its subject
+
+Return exactly 3 variations, each as a complete search query."""
+        
+        try:
+            gemini = self._get_gemini_service()
+            variations = await gemini.generate_content(
+                prompt=prompt,
+                response_schema=TopicVariations
+            )
+            
+            result = [
+                variations.variation_1,
+                variations.variation_2,
+                variations.variation_3
+            ]
+            
+            logger.info("Theme Query Expansion Generated:")
+            logger.info(f"  Original: {topic_text[:80]}{'...' if len(topic_text) > 80 else ''}")
+            for i, var in enumerate(result, 1):
+                logger.info(f"  Variation {i}: {var[:80]}{'...' if len(var) > 80 else ''}")
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate theme variations: {e}. Using original phrase only.")
+            return []
+    
     async def close(self):
         """Close the shared HTTP session."""
         if self._session and not self._session.closed:
@@ -331,6 +406,158 @@ Return exactly 3 variations, each as a complete search query."""
         
         return list(doc_map.values())
     
+    def _build_filters(
+        self,
+        days: float,
+        entity_id: Optional[str] = None,
+        sentiment: bool = False,
+        document_types: Optional[List[str]] = None,
+    ) -> Dict:
+        """
+        Build the ``query.filters`` block for a /search request.
+
+        Omitting ``entity_id`` produces a theme (sector) query that is not scoped to
+        any company, which is what sector searches rely on.
+
+        Args:
+            days: Lookback window in days (fractional values allowed)
+            entity_id: Bigdata entity ID to scope the search to, or None for theme search
+            sentiment: If True, exclude neutral chunks (positive/negative only)
+            document_types: Document types to include (defaults to NEWS + TRANSCRIPT)
+
+        Returns:
+            Filters dictionary ready to embed in the request body
+        """
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+
+        filters: Dict = {
+            "timestamp": {
+                "start": self._format_timestamp(start_time),
+                "end": self._format_timestamp(end_time)
+            },
+            "document_type": {
+                "mode": "INCLUDE",
+                "values": document_types or ["NEWS", "TRANSCRIPT"]
+            }
+        }
+
+        if entity_id:
+            filters["entity"] = {"all_of": [entity_id]}
+
+        if sentiment:
+            filters["sentiment"] = {"values": ["positive", "negative"]}
+
+        return filters
+
+    async def _post_search(
+        self,
+        text: str,
+        filters: Dict,
+        max_chunks: int,
+        log_label: str,
+        error_log_level: int = logging.WARNING,
+    ) -> List[Dict]:
+        """
+        Execute a /search request and return deduplicated ``{article, best_chunk, relevance}`` items.
+
+        Handles rate limiting, transport errors and per-document deduplication so callers
+        only deal with formatting. Returns an empty list on any failure.
+
+        Args:
+            text: Semantic query text
+            filters: Filters block from :meth:`_build_filters`
+            max_chunks: Maximum chunks to request
+            log_label: Human-readable identifier used in log messages
+            error_log_level: Level used for non-200 responses (404 is never logged)
+
+        Returns:
+            Deduplicated result items, or an empty list on error
+        """
+        await self.rate_limiter.acquire()
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/search",
+                headers={
+                    "X-API-KEY": self.api_key,
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "query": {
+                        "text": text,
+                        "filters": filters,
+                        "max_chunks": max_chunks
+                    }
+                },
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get("results", [])
+                    deduplicated = self._deduplicate_by_document_id(results)
+                    logger.debug(
+                        f"{log_label}: {len(results)} raw results -> {len(deduplicated)} unique documents"
+                    )
+                    return deduplicated
+
+                if response.status != 404:
+                    error_text = await response.text()
+                    logger.log(
+                        error_log_level,
+                        f"Search error for {log_label}: {response.status} - {error_text}"
+                    )
+                return []
+
+        except asyncio.TimeoutError:
+            logger.log(error_log_level, f"Timeout in search for {log_label}")
+            return []
+        except Exception as e:
+            logger.log(error_log_level, f"Error in search for {log_label}: {str(e)}")
+            return []
+
+    def _format_article(
+        self,
+        article: Dict,
+        best_chunk: Dict,
+        relevance: float,
+        fallback_id: str,
+        **extra
+    ) -> Dict:
+        """
+        Convert a raw API document plus its best chunk into the article shape used by the UI.
+
+        Args:
+            article: Raw document from the API
+            best_chunk: Highest-relevance chunk for that document
+            relevance: Relevance score of ``best_chunk``
+            fallback_id: ID to use when the document has none
+            **extra: Search-specific fields (search_type, topic, ticker, sector, ...)
+
+        Returns:
+            Article dictionary
+        """
+        chunk_text = best_chunk.get("text", "")
+        summary = chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text
+        timestamp = article.get("timestamp", "")
+
+        formatted = {
+            "id": article.get("id", fallback_id),
+            "headline": article.get("headline", "No headline"),
+            "timestamp": timestamp,
+            "time_ago": self._get_time_ago(timestamp),
+            "source": article.get("source", {}).get("name", "Unknown"),
+            "summary": summary,
+            "full_text": chunk_text,  # Full chunk text for expanded view
+            "document_url": article.get("url"),  # URL to original article (from "url" field)
+            "relevance": relevance,
+            "document_type": article.get("document_type", "NEWS"),
+            "detections": best_chunk.get("detections", []),  # Entity detections from the chunk
+        }
+        formatted.update(extra)
+        return formatted
+
     async def get_company_data(self, ticker: str) -> Optional[CompanyData]:
         """
         Get company entity ID and name from Knowledge Graph API.
@@ -422,100 +649,29 @@ Return exactly 3 variations, each as a complete search query."""
         """
         logger.info(f"Running baseline search for {ticker}")
         
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=days)
+        deduplicated = await self._post_search(
+            text="earnings financial results stock news",
+            filters=self._build_filters(days, entity_id=entity_id),
+            max_chunks=max_chunks,
+            log_label=f"baseline search for {ticker}",
+            error_log_level=logging.ERROR,
+        )
         
-        # Acquire rate limit token
-        await self.rate_limiter.acquire()
+        articles = [
+            self._format_article(
+                item["article"],
+                item["best_chunk"],
+                item["relevance"],
+                fallback_id=f"baseline_{i}",
+                search_type="baseline",
+                topic=None,
+                ticker=ticker,
+            )
+            for i, item in enumerate(deduplicated)
+        ]
         
-        try:
-            session = await self._get_session()
-            async with session.post(
-                f"{self.base_url}/search",
-                headers={
-                    "X-API-KEY": self.api_key,
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "query": {
-                        "text": "earnings financial results stock news",
-                        "filters": {
-                            "timestamp": {
-                                "start": self._format_timestamp(start_time),
-                                "end": self._format_timestamp(end_time)
-                            },
-                            "entity": {
-                                "all_of": [entity_id]
-                            },
-                            "document_type": {
-                                "mode": "INCLUDE",
-                                "values": ["NEWS", "TRANSCRIPT"]
-                            }
-                        },
-                        "max_chunks": max_chunks
-                    }
-                },
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        results = data.get("results", [])
-                        
-                        logger.debug(f"Baseline search raw results: {len(results)} articles")
-                        
-                        # Deduplicate by document ID first
-                        deduplicated = self._deduplicate_by_document_id(results)
-                        
-                        articles = []
-                        for i, item in enumerate(deduplicated):
-                            article = item["article"]
-                            best_chunk = item["best_chunk"]
-                            relevance = item["relevance"]
-                            
-                            chunk_text = best_chunk.get("text", "")
-                            summary = chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text
-                            
-                            # Parse timestamp for time_ago
-                            timestamp = article.get("timestamp", "")
-                            time_ago = self._get_time_ago(timestamp)
-                            
-                            # Get detections from the chunk
-                            detections = best_chunk.get("detections", [])
-                            
-                            articles.append({
-                                "id": article.get("id", f"baseline_{i}"),
-                                "headline": article.get("headline", "No headline"),
-                                "timestamp": timestamp,
-                                "time_ago": time_ago,
-                                "source": article.get("source", {}).get("name", "Unknown"),
-                                "summary": summary,
-                                "full_text": chunk_text,  # Full chunk text for expanded view
-                                "document_url": article.get("url"),  # URL to original article (from "url" field)
-                                "relevance": relevance,
-                                "document_type": article.get("document_type", "NEWS"),
-                                "search_type": "baseline",
-                                "topic": None,
-                                "ticker": ticker,
-                                "detections": detections,  # Entity detections from the chunk
-                            })
-                        
-                        logger.info(f"Baseline search for {ticker}: {len(articles)} unique articles (from {len(results)} raw results)")
-                        return articles
-                    
-                    else:
-                        error_text = await response.text()
-                        logger.error(
-                            f"Baseline search error for {ticker}: "
-                            f"{response.status} - {error_text}"
-                        )
-                        return []
-        
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout in baseline search for {ticker}")
-            return []
-        except Exception as e:
-            logger.error(f"Error in baseline search for {ticker}: {str(e)}")
-            return []
+        logger.info(f"Baseline search for {ticker}: {len(articles)} unique articles")
+        return articles
     
     async def search_single_topic(
         self,
@@ -558,109 +714,85 @@ Return exactly 3 variations, each as a complete search query."""
         truncated_topic = formatted_topic[:60] + "..." if len(formatted_topic) > 60 else formatted_topic
         logger.debug(f"Searching topic {topic_index} for {ticker}: {truncated_topic}")
         
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=days)
+        deduplicated = await self._post_search(
+            text=formatted_topic,
+            filters=self._build_filters(days, entity_id=entity_id, sentiment=True),
+            max_chunks=max_chunks,
+            log_label=f"{ticker} topic {topic_index}",
+        )
         
-        # Acquire rate limit token
-        await self.rate_limiter.acquire()
+        return [
+            self._format_article(
+                item["article"],
+                item["best_chunk"],
+                item["relevance"],
+                fallback_id=f"topic_{topic_index}_{i}",
+                search_type="topic",
+                topic=formatted_topic,
+                topic_name=topic_name,
+                topic_index=topic_index,
+                ticker=ticker,
+            )
+            for i, item in enumerate(deduplicated)
+        ]
+    
+    async def search_single_theme(
+        self,
+        topic,
+        topic_index: int,
+        days: float = 7,
+        max_chunks: int = 20,
+        sector: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Perform a theme (sector) search with no entity filter.
         
-        try:
-            session = await self._get_session()
-            async with session.post(
-                f"{self.base_url}/search",
-                headers={
-                    "X-API-KEY": self.api_key,
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "query": {
-                        "text": formatted_topic,
-                        "filters": {
-                            "timestamp": {
-                                "start": self._format_timestamp(start_time),
-                                "end": self._format_timestamp(end_time)
-                            },
-                            "entity": {
-                                "all_of": [entity_id]
-                            },
-                            "document_type": {
-                                "mode": "INCLUDE",
-                                "values": ["NEWS", "TRANSCRIPT"]
-                            },
-                            "sentiment": {
-                                "values": ["positive", "negative"]
-                            }
-                        },
-                        "max_chunks": max_chunks
-                    }
-                },
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        results = data.get("results", [])
-                        
-                        # Deduplicate by document ID first
-                        deduplicated = self._deduplicate_by_document_id(results)
-                        
-                        articles = []
-                        for i, item in enumerate(deduplicated):
-                            article = item["article"]
-                            best_chunk = item["best_chunk"]
-                            relevance = item["relevance"]
-                            
-                            chunk_text = best_chunk.get("text", "")
-                            summary = chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text
-                            
-                            # Parse timestamp for time_ago
-                            timestamp = article.get("timestamp", "")
-                            time_ago = self._get_time_ago(timestamp)
-                            
-                            # Get detections from the chunk
-                            detections = best_chunk.get("detections", [])
-                            
-                            articles.append({
-                                "id": article.get("id", f"topic_{topic_index}_{i}"),
-                                "headline": article.get("headline", "No headline"),
-                                "timestamp": timestamp,
-                                "time_ago": time_ago,
-                                "source": article.get("source", {}).get("name", "Unknown"),
-                                "summary": summary,
-                                "full_text": chunk_text,  # Full chunk text for expanded view
-                                "document_url": article.get("url"),  # URL to original article (from "url" field)
-                                "relevance": relevance,
-                                "document_type": article.get("document_type", "NEWS"),
-                                "search_type": "topic",
-                                "topic": formatted_topic,
-                                "topic_name": topic_name,
-                                "topic_index": topic_index,
-                                "ticker": ticker,
-                                "detections": detections,  # Entity detections from the chunk
-                            })
-                        
-                        if articles:
-                            logger.debug(
-                                f"Topic {topic_index} for {ticker}: {len(articles)} unique articles (from {len(results)} raw results)"
-                            )
-                        
-                        return articles
-                    
-                    else:
-                        # Don't log every 404/empty result as error
-                        if response.status != 404:
-                            error_text = await response.text()
-                            logger.warning(
-                                f"Topic search error for {ticker} topic {topic_index}: "
-                                f"{response.status} - {error_text}"
-                            )
-                        return []
+        Unlike :meth:`search_single_topic`, the phrase is used verbatim: sector topics
+        carry no ``{company}`` placeholder because no company is resolved.
         
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout in topic {topic_index} search for {ticker}")
+        Args:
+            topic: Topic dict with {topic_name, topic_text}, or a plain phrase string
+            topic_index: Index of the topic in the sector's topic list
+            days: Number of days to look back
+            max_chunks: Maximum chunks to return
+            sector: Sector id to tag results with
+            
+        Returns:
+            List of article dictionaries tagged with the topic and sector
+        """
+        if isinstance(topic, dict):
+            topic_name = topic.get("topic_name") or f"Topic {topic_index + 1}"
+            topic_text = topic.get("topic_text", "")
+        else:
+            topic_name = f"Topic {topic_index + 1}"
+            topic_text = topic
+        
+        topic_text = topic_text.strip()
+        if not topic_text:
+            logger.warning(f"Skipping empty theme topic at index {topic_index}")
             return []
-        except Exception as e:
-            logger.warning(f"Error in topic {topic_index} search for {ticker}: {str(e)}")
-            return []
+        
+        deduplicated = await self._post_search(
+            text=topic_text,
+            filters=self._build_filters(days, sentiment=True),
+            max_chunks=max_chunks,
+            log_label=f"{sector or 'sector'} theme {topic_index}",
+        )
+        
+        return [
+            self._format_article(
+                item["article"],
+                item["best_chunk"],
+                item["relevance"],
+                fallback_id=f"theme_{topic_index}_{i}",
+                search_type="theme",
+                topic=topic_text,
+                topic_name=topic_name,
+                topic_index=topic_index,
+                sector=sector,
+            )
+            for i, item in enumerate(deduplicated)
+        ]
     
     async def search_ticker(
         self,
@@ -761,8 +893,7 @@ Return exactly 3 variations, each as a complete search query."""
         
         total_queries = len(search_topics_with_info)
         
-        # Chunk allocation: 100 chunk budget divided across ALL queries (originals + variations)
-        TOTAL_CHUNK_BUDGET = 300
+        # Chunk budget divided across ALL queries (originals + variations)
         chunks_per_query = max(1, TOTAL_CHUNK_BUDGET // total_queries)  # Min 1 per query
         
         logger.info(
@@ -961,4 +1092,173 @@ Return exactly 3 variations, each as a complete search query."""
                 })
         
         return valid_results
+    
+    async def _expand_sector_topics(
+        self,
+        topics: List[Dict],
+        expansion_prompt: str
+    ) -> List[Dict]:
+        """
+        Expand each theme phrase into itself plus up to 3 AI-generated variations.
+        
+        Variations inherit the parent's ``topic_name`` so they collapse into the same
+        UI topic tab, and are flagged with ``is_variation`` for the search stats.
+        
+        Args:
+            topics: Original theme topics
+            expansion_prompt: Sector-specific expansion guidance
+            
+        Returns:
+            Combined list of original and variation topics
+        """
+        variation_start = datetime.now()
+        logger.info(f"Generating query variations for {len(topics)} theme phrases...")
+        
+        all_variations = await asyncio.gather(
+            *(self.generate_theme_variations(topic, expansion_prompt) for topic in topics),
+            return_exceptions=True
+        )
+        
+        expanded: List[Dict] = []
+        for i, (topic, variations) in enumerate(zip(topics, all_variations)):
+            topic_name = topic.get("topic_name") or f"Topic {i + 1}"
+            expanded.append({**topic, "is_variation": False})
+            
+            if isinstance(variations, list):
+                expanded.extend(
+                    {"topic_name": topic_name, "topic_text": variation, "is_variation": True}
+                    for variation in variations
+                )
+            else:
+                logger.warning(f"Failed to expand theme phrase {i}: {variations}")
+        
+        elapsed = (datetime.now() - variation_start).total_seconds()
+        logger.info(
+            f"Generated theme variations in {elapsed:.2f}s: "
+            f"{len(topics)} original phrases -> {len(expanded)} total queries"
+        )
+        return expanded
+    
+    async def search_sector(
+        self,
+        sector_id: str,
+        topics: List[Dict],
+        days: float = 7,
+        min_relevance: float = 0.0,
+        batch_size: int = 50,
+        sector_label: Optional[str] = None,
+        query_reformulation: bool = False,
+        expansion_prompt: str = ""
+    ) -> Dict:
+        """
+        Search a sector's theme topics in parallel (no entity resolution).
+        
+        Args:
+            sector_id: Sector identifier used to tag results
+            topics: Topic dicts with {topic_name, topic_text} and no {company} placeholder
+            days: Number of days to look back
+            min_relevance: Minimum relevance threshold to filter results
+            batch_size: Number of concurrent requests per batch
+            sector_label: Display label echoed back to the caller
+            query_reformulation: If True, use Gemini to add 3 variations per phrase
+            expansion_prompt: Sector-specific expansion guidance (required when expanding)
+            
+        Returns:
+            Dictionary with theme results and metadata
+        """
+        start_time = datetime.now()
+        mode = "SECTOR search with query expansion" if query_reformulation else "SECTOR search"
+        logger.info(f"Starting {mode} for {sector_id} ({len(topics)} topics, {days} days)")
+        
+        if not topics:
+            return {
+                "sector": sector_id,
+                "sector_label": sector_label or sector_id,
+                "theme_results": [],
+                "total_results": 0,
+                "search_stats": {
+                    "topics_searched": 0,
+                    "queries_executed": 0,
+                    "variations_generated": 0,
+                    "query_reformulation": query_reformulation,
+                    "elapsed_seconds": 0.0,
+                    "rate_limiter_stats": self.rate_limiter.get_metrics(),
+                },
+            }
+        
+        if query_reformulation:
+            search_topics = await self._expand_sector_topics(topics, expansion_prompt)
+        else:
+            search_topics = [{**topic, "is_variation": False} for topic in topics]
+        
+        variations_generated = sum(1 for t in search_topics if t["is_variation"])
+        
+        # Chunk budget divided across ALL queries (originals + variations)
+        chunks_per_query = max(1, TOTAL_CHUNK_BUDGET // len(search_topics))
+        logger.info(
+            f"Chunk allocation for {sector_id}: "
+            f"queries={len(search_topics)} x {chunks_per_query} chunks (budget={TOTAL_CHUNK_BUDGET})"
+        )
+        
+        theme_results: List[Dict] = []
+        
+        for offset in range(0, len(search_topics), batch_size):
+            batch = search_topics[offset:offset + batch_size]
+            batch_tasks = [
+                self.search_single_theme(
+                    topic,
+                    offset + i,
+                    days=days,
+                    max_chunks=chunks_per_query,
+                    sector=sector_id,
+                )
+                for i, topic in enumerate(batch)
+            ]
+            
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            for topic, result in zip(batch, batch_results):
+                if isinstance(result, list):
+                    theme_results.extend(result)
+                    topic_text = topic.get("topic_text", "")
+                    truncated = topic_text[:70] + "..." if len(topic_text) > 70 else topic_text
+                    label = "Variation" if topic["is_variation"] else "Theme"
+                    logger.info(f"  [{label}] {truncated} -> {len(result)} results")
+                else:
+                    logger.error(f"Theme search failed: {result}")
+        
+        # Same article can surface under several themes (and variations of one theme
+        # overlap heavily by design) - keep the highest relevance copy
+        raw_count = len(theme_results)
+        theme_results = self._deduplicate_across_topics(theme_results)
+        if raw_count > len(theme_results):
+            logger.info(
+                f"Cross-theme deduplication for {sector_id}: "
+                f"{raw_count} raw -> {len(theme_results)} unique"
+            )
+        
+        if min_relevance > 0:
+            theme_results = [r for r in theme_results if r.get("relevance", 0) >= min_relevance]
+        
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(
+            f"Completed sector search for {sector_id}: "
+            f"{len(theme_results)} results in {elapsed:.2f}s"
+        )
+        
+        return {
+            "sector": sector_id,
+            "sector_label": sector_label or sector_id,
+            "theme_results": theme_results,
+            "total_results": len(theme_results),
+            "search_stats": {
+                "topics_searched": len(topics),
+                "queries_executed": len(search_topics),
+                "variations_generated": variations_generated,
+                "query_reformulation": query_reformulation,
+                "chunks_per_query": chunks_per_query,
+                "elapsed_seconds": round(elapsed, 2),
+                "rate_limiter_stats": self.rate_limiter.get_metrics(),
+            },
+        }
 
