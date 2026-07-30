@@ -152,8 +152,16 @@
         <!-- Sector Tiles -->
         <div class="sector-tiles-bar">
             <label class="sector-tiles-label">SECTOR DESK:</label>
-            <div id="sectorTiles" class="sector-tiles">
-                <div class="sector-tiles-loading">Loading sectors...</div>
+            <div class="sector-carousel">
+                <button type="button" id="sectorScrollPrev" class="sector-carousel-arrow"
+                        aria-label="Show previous sectors">&#8249;</button>
+                <div id="sectorTilesViewport" class="sector-tiles-viewport">
+                    <div id="sectorTiles" class="sector-tiles">
+                        <div class="sector-tiles-loading">Loading sectors...</div>
+                    </div>
+                </div>
+                <button type="button" id="sectorScrollNext" class="sector-carousel-arrow"
+                        aria-label="Show next sectors">&#8250;</button>
             </div>
         </div>
 

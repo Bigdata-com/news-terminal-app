@@ -1782,11 +1782,57 @@ button:focus,
     padding-top: 10px;
 }
 
+.sector-carousel {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    flex: 1;
+    min-width: 0; /* Let the viewport shrink instead of pushing the bar wider */
+}
+
+.sector-carousel-arrow {
+    flex: 0 0 auto;
+    width: 22px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sector-carousel-arrow:hover:not(:disabled) {
+    border-color: #58a6ff;
+    color: #58a6ff;
+}
+
+.sector-carousel-arrow:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.sector-carousel.no-overflow .sector-carousel-arrow {
+    display: none;
+}
+
+.sector-tiles-viewport {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scroll-behavior: smooth;
+    scrollbar-width: none; /* The arrows are the scroll affordance */
+    -ms-overflow-style: none;
+}
+
+.sector-tiles-viewport::-webkit-scrollbar {
+    display: none;
+}
+
 .sector-tiles {
     display: flex;
     gap: 10px;
-    flex-wrap: wrap;
-    flex: 1;
 }
 
 .sector-tiles-loading {
@@ -1801,7 +1847,8 @@ button:focus,
     border: 1px solid #30363d;
     border-radius: 6px;
     padding: 10px 14px;
-    min-width: 170px;
+    /* Uniform, non-shrinking cells so the carousel scrolls a predictable step */
+    flex: 0 0 200px;
     cursor: pointer;
     transition: all 0.2s ease;
     user-select: none;
@@ -1842,7 +1889,6 @@ button:focus,
     color: #8b949e;
     margin-top: 3px;
     line-height: 1.4;
-    max-width: 220px;
 }
 
 .sector-tile-meta {
@@ -1950,8 +1996,14 @@ button:focus,
         padding-top: 0;
     }
 
+    /* The bar stacks here, and its flex-start alignment would otherwise let the
+       carousel size to its tiles and scroll the whole page sideways */
+    .sector-carousel {
+        align-self: stretch;
+    }
+
     .sector-tile {
-        min-width: 140px;
+        flex-basis: 165px;
     }
 
     .col-source,

@@ -18,6 +18,23 @@ from config.sector_topics import (
     safe_sector_topics_revision,
 )
 
+# Every desk must be covered by the structural checks below, so drive them off the registry.
+ALL_TOPICS: list[tuple[str, dict[str, str]]] = [
+    (sector["id"], topic) for sector in SECTORS for topic in sector["topics"]
+]
+SECTOR_IDS: list[str] = [sector["id"] for sector in SECTORS]
+
+DISABLED_SECTOR: list[dict[str, object]] = [
+    {
+        "id": "not_ready",
+        "label": "Not Ready",
+        "description": "Placeholder desk",
+        "enabled": False,
+        "topics": [],
+        "expansion_prompt": "",
+    }
+]
+
 
 def test_sector_topics_revision_is_positive_integer() -> None:
     """Web UI only syncs when revision is a finite integer >= 1 (see static/sector.js)."""
@@ -46,24 +63,40 @@ def test_safe_sector_topics_revision_zero_falls_back_to_one(
     assert safe_sector_topics_revision() == 1
 
 
-def test_energy_topics_have_no_company_placeholder() -> None:
+@pytest.mark.parametrize(("sector_id", "topic"), ALL_TOPICS)
+def test_topics_have_no_company_placeholder(sector_id: str, topic: dict[str, str]) -> None:
     """Sector phrases are sent verbatim, so a {company} placeholder would be searched literally."""
-    for topic in ENERGY_TOPICS:
-        assert "{company}" not in topic["topic_text"]
-        assert "{" not in topic["topic_text"]
+    assert "{company}" not in topic["topic_text"]
+    assert "{" not in topic["topic_text"]
 
 
-def test_energy_topics_have_non_empty_name_and_text() -> None:
-    for topic in ENERGY_TOPICS:
-        assert set(topic) == {"topic_name", "topic_text"}
-        assert topic["topic_name"].strip()
-        assert topic["topic_text"].strip()
+@pytest.mark.parametrize(("sector_id", "topic"), ALL_TOPICS)
+def test_topics_have_non_empty_name_and_text(sector_id: str, topic: dict[str, str]) -> None:
+    assert set(topic) == {"topic_name", "topic_text"}
+    assert topic["topic_name"].strip()
+    assert topic["topic_text"].strip()
 
 
-def test_energy_topic_names_are_usable_as_tab_labels() -> None:
+@pytest.mark.parametrize(("sector_id", "topic"), ALL_TOPICS)
+def test_topic_names_are_usable_as_tab_labels(sector_id: str, topic: dict[str, str]) -> None:
     """The UI renders topic_name uppercased in a narrow tab, so keep labels short."""
-    for topic in ENERGY_TOPICS:
-        assert len(topic["topic_name"]) <= 24
+    assert len(topic["topic_name"]) <= 24
+
+
+@pytest.mark.parametrize("sector_id", SECTOR_IDS)
+def test_topic_texts_are_unique_within_a_sector(sector_id: str) -> None:
+    """Duplicate phrases waste a search slot and add nothing after deduplication."""
+    texts = [topic["topic_text"] for topic in get_sector(sector_id)["topics"]]
+    assert len(texts) == len(set(texts))
+
+
+@pytest.mark.parametrize("sector_id", SECTOR_IDS)
+def test_enabled_sectors_have_topics_and_a_prompt(sector_id: str) -> None:
+    sector = get_sector(sector_id)
+
+    assert sector["topics"], f"{sector_id} is enabled but has no topics"
+    assert sector["expansion_prompt"].strip()
+    assert sector["description"].strip()
 
 
 def test_get_sector_is_case_and_whitespace_insensitive() -> None:
@@ -75,10 +108,10 @@ def test_get_sector_returns_topics() -> None:
     assert get_sector("energy")["topics"] == ENERGY_TOPICS
 
 
-def test_get_sector_raises_for_disabled_sector() -> None:
-    disabled = next(s for s in SECTORS if not s["enabled"])
+def test_get_sector_raises_for_disabled_sector(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sector_topics_module, "SECTORS", DISABLED_SECTOR)
     with pytest.raises(UnknownSectorError, match="not available yet"):
-        get_sector(disabled["id"])
+        sector_topics_module.get_sector("not_ready")
 
 
 def test_get_sector_raises_for_unknown_sector() -> None:
@@ -98,16 +131,40 @@ def test_list_sectors_exposes_tile_metadata_without_payloads() -> None:
     assert by_id["energy"]["topic_count"] == len(ENERGY_TOPICS)
 
 
-def test_disabled_sectors_have_no_topics() -> None:
-    for sector in SECTORS:
-        if not sector["enabled"]:
-            assert sector["topics"] == []
-            assert sector["description"].strip()
+def test_disabled_sectors_have_no_topics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Placeholder tiles render as "coming soon" and must not ship phrases."""
+    monkeypatch.setattr(sector_topics_module, "SECTORS", DISABLED_SECTOR)
+
+    listed = sector_topics_module.list_sectors()
+
+    assert listed[0]["enabled"] is False
+    assert listed[0]["topic_count"] == 0
+    assert sector_topics_module.default_topics_by_sector() == {}
 
 
 def test_sector_ids_are_unique() -> None:
     ids = [sector["id"] for sector in SECTORS]
     assert len(ids) == len(set(ids))
+
+
+def test_sector_ids_are_url_and_storage_safe() -> None:
+    """Ids travel in the /api/sector-news body and key the browser's cached topic lists."""
+    for sector_id in SECTOR_IDS:
+        assert sector_id == sector_id.lower()
+        assert sector_id.replace("_", "").isalnum()
+
+
+def test_expected_sector_desks_are_registered() -> None:
+    expected = {
+        "energy",
+        "metals_mining",
+        "utilities_power",
+        "shipping_freight",
+        "finance",
+        "technology",
+        "insurance",
+    }
+    assert expected.issubset(set(SECTOR_IDS))
 
 
 def test_energy_expansion_prompt_is_desk_specific() -> None:
@@ -119,9 +176,30 @@ def test_energy_expansion_prompt_is_desk_specific() -> None:
         assert term.lower() in prompt.lower()
 
 
-def test_energy_expansion_prompt_has_no_company_placeholder() -> None:
-    assert "{company}" not in ENERGY_EXPANSION_PROMPT
-    assert "{" not in ENERGY_EXPANSION_PROMPT
+@pytest.mark.parametrize(
+    ("sector_id", "terms"),
+    [
+        ("metals_mining", ("LME", "iron ore", "AISC", "smelter")),
+        ("utilities_power", ("PJM", "ERCOT", "capacity auction", "rate case")),
+        ("shipping_freight", ("Baltic Dry Index", "Worldscale", "Panama Canal", "VLSFO")),
+        ("finance", ("net interest", "CET1", "FOMC", "private credit")),
+        ("technology", ("hyperscaler", "HBM", "foundry", "export controls")),
+        ("insurance", ("combined", "rate-on-line", "catastrophe bond", "medical loss")),
+    ],
+)
+def test_sector_expansion_prompts_carry_desk_vocabulary(
+    sector_id: str, terms: tuple[str, ...]
+) -> None:
+    prompt = get_sector_expansion_prompt(sector_id)
+    for term in terms:
+        assert term.lower() in prompt.lower()
+
+
+@pytest.mark.parametrize("sector_id", SECTOR_IDS)
+def test_expansion_prompts_have_no_company_placeholder(sector_id: str) -> None:
+    prompt = get_sector_expansion_prompt(sector_id)
+    assert "{company}" not in prompt
+    assert "{" not in prompt
 
 
 def test_get_sector_expansion_prompt_falls_back_for_sector_without_prompt(
@@ -146,16 +224,12 @@ def test_get_sector_expansion_prompt_falls_back_for_sector_without_prompt(
     assert prompt.strip()
 
 
-def test_get_sector_expansion_prompt_raises_for_disabled_sector() -> None:
-    disabled = next(s for s in SECTORS if not s["enabled"])
+def test_get_sector_expansion_prompt_raises_for_disabled_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sector_topics_module, "SECTORS", DISABLED_SECTOR)
     with pytest.raises(UnknownSectorError):
-        get_sector_expansion_prompt(disabled["id"])
-
-
-def test_every_enabled_sector_has_an_expansion_prompt() -> None:
-    for sector in SECTORS:
-        if sector["enabled"]:
-            assert sector["expansion_prompt"].strip()
+        sector_topics_module.get_sector_expansion_prompt("not_ready")
 
 
 def test_list_sectors_does_not_leak_expansion_prompts() -> None:

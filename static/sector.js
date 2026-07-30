@@ -2,6 +2,7 @@
 const SECTOR_STORAGE_KEY = 'sectorTerminalSettings';
 const SECTOR_FETCH_TIMEOUT_MS = 300000; // Theme searches fan out one query per phrase
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
+const SECTOR_TILE_GAP_PX = 10; // Must match the .sector-tiles gap in style.css
 
 // Sector registry and server defaults from /api/sectors
 let sectors = [];
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadSettings();
     parseUrlParameters();
     renderSectorTiles();
+    initializeSectorCarousel();
     initializeFilters();
     renderTopicsInputList();
     updateTopicsCount();
@@ -277,8 +279,11 @@ function renderSectorTiles() {
 
     if (sectors.length === 0) {
         container.innerHTML = '<div class="sector-tiles-loading">No sectors available</div>';
+        updateCarouselArrows();
         return;
     }
+
+    let activeTile = null;
 
     sectors.forEach(sector => {
         const tile = document.createElement('div');
@@ -309,8 +314,71 @@ function renderSectorTiles() {
             tile.onclick = () => selectSector(sector.id);
         }
 
+        if (isActive) {
+            activeTile = tile;
+        }
+
         container.appendChild(tile);
     });
+
+    // The selected desk can sit past the right edge of the carousel on a narrow window
+    if (activeTile) {
+        activeTile.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    updateCarouselArrows();
+}
+
+/**
+ * Wire the carousel arrows and keep their enabled state in sync with the scroll position.
+ * Called once on load; the tile list itself is re-rendered on every sector switch.
+ */
+function initializeSectorCarousel() {
+    const viewport = document.getElementById('sectorTilesViewport');
+    const prev = document.getElementById('sectorScrollPrev');
+    const next = document.getElementById('sectorScrollNext');
+    if (!viewport || !prev || !next) {
+        return;
+    }
+
+    prev.addEventListener('click', () => scrollSectorTiles(-1));
+    next.addEventListener('click', () => scrollSectorTiles(1));
+    viewport.addEventListener('scroll', updateCarouselArrows);
+    window.addEventListener('resize', updateCarouselArrows);
+
+    updateCarouselArrows();
+}
+
+/** Scroll roughly one screenful of tiles, snapping to a whole number of tiles. */
+function scrollSectorTiles(direction) {
+    const viewport = document.getElementById('sectorTilesViewport');
+    if (!viewport) {
+        return;
+    }
+
+    const tile = viewport.querySelector('.sector-tile');
+    const step = tile ? tile.offsetWidth + SECTOR_TILE_GAP_PX : viewport.clientWidth;
+    const tilesPerPage = Math.max(1, Math.floor(viewport.clientWidth / step));
+
+    viewport.scrollBy({ left: direction * step * tilesPerPage, behavior: 'smooth' });
+}
+
+function updateCarouselArrows() {
+    const viewport = document.getElementById('sectorTilesViewport');
+    const prev = document.getElementById('sectorScrollPrev');
+    const next = document.getElementById('sectorScrollNext');
+    if (!viewport || !prev || !next) {
+        return;
+    }
+
+    // Fractional scroll widths mean the end is never reached exactly
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    const overflows = maxScroll > 1;
+
+    // On a wide window every desk fits, so the arrows would be dead controls
+    viewport.closest('.sector-carousel').classList.toggle('no-overflow', !overflows);
+
+    prev.disabled = !overflows || viewport.scrollLeft <= 1;
+    next.disabled = !overflows || viewport.scrollLeft >= maxScroll - 1;
 }
 
 function selectSector(sectorId) {

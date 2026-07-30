@@ -18,9 +18,18 @@ Two terminals share the same backend and styling:
 | `/` | Company desk — one or more tickers | Entity-filtered, `{company}` substituted into each topic |
 | `/sector` | Sector desk — one theme, no ticker | Theme-only, no entity filter, phrases sent verbatim |
 
-The sector page ships with an Energy desk (15 editable phrases covering crude, OPEC+, refining, gas
-and LNG, freight, sanctions and policy). Additional sector tiles are registered but disabled until
-their topic sets are defined.
+The sector page ships with seven desks, each carrying 15 editable phrases and its own AI
+query-expansion prompt:
+
+| Tile | Coverage |
+|---|---|
+| Energy | Crude and product prices, OPEC+, refining and cracks, gas and LNG, freight, sanctions, policy |
+| Metals & Mining | Copper, iron ore and steel, precious and battery metals, mine supply, cost curves, resource nationalism |
+| Utilities & Power | Wholesale power, capacity auctions, data centre load, rate cases, grid and generation capex |
+| Shipping & Freight | Dry bulk, tanker and container rates, chokepoints, fleet supply, decarbonisation rules, land and air freight |
+| Finance | Rates and Fed policy, net interest margin, credit quality, trading and banking fees, capital and regulation |
+| Technology | AI capex, semiconductor cycle, memory pricing, export controls, cloud and software demand, antitrust |
+| Insurance | Catastrophe losses, pricing cycle, reinsurance renewals, reserves, ILS capacity, life and health |
 
 ### AI-Powered Report Generation
 - 📊 **Executive Briefs** - Concise bullet points (one per topic) for quick review
@@ -264,7 +273,7 @@ Unknown or not-yet-enabled sector ids return ``404``.
 
 ### Sector terminal (`/sector`)
 
-1. Click a sector tile (Energy is enabled; others are dimmed until their topics are defined)
+1. Click a sector tile (any tile registered without topics is dimmed until its phrases are defined)
 2. The feed loads immediately, grouped into one tab per topic
 3. Use "Edit Topics" to rename, reword, add or remove search phrases — they persist in ``localStorage``
 4. Use the date range buttons to widen or narrow the lookback window
@@ -374,9 +383,13 @@ The web UI loads default topic templates from ``GET /api/config`` and caches the
 reorder, or edit** any sector's topic list, increment ``SECTOR_TOPICS_REVISION`` so browsers holding
 stale phrases pick up the new defaults.
 
-To enable one of the placeholder sectors, define its phrase list, flip ``enabled`` to ``True`` in the
-``SECTORS`` registry, and bump the revision. Sector phrases must not contain ``{company}`` — there is no
-entity to substitute, so the placeholder would be searched literally (the UI rejects it on save).
+To add a desk, define its phrase list and ``expansion_prompt``, register the tile with ``enabled`` set
+to ``True`` in the ``SECTORS`` registry, and bump the revision. Sector phrases must not contain
+``{company}`` — there is no entity to substitute, so the placeholder would be searched literally (the UI
+rejects it on save). Write each phrase the way a news story would describe the event and keep desk
+jargon for the expansion prompt: a purely technical phrase (``"CECL reserve builds"``,
+``"day-ahead locational marginal prices"``) matches far fewer chunks than the same idea in plain market
+language, so sanity check a new phrase against a short lookback window before shipping it.
 
 ### Per-sector AI query expansion prompts
 
@@ -385,7 +398,11 @@ instruction mostly yields synonym swaps; naming the desk's benchmarks, venues an
 variations retrieve genuinely different documents. ``ENERGY_EXPANSION_PROMPT`` supplies crude and
 products vocabulary (Brent/WTI/Dubai, OPEC+ quotas and spare capacity, crack spreads, refinery
 turnarounds, VLCC and Suezmax freight, Hormuz and Red Sea chokepoints, EIA/IEA reports, Cushing and ARA
-inventories, TTF/Henry Hub/JKM, sanctions and price caps, FIDs and upstream capex).
+inventories, TTF/Henry Hub/JKM, sanctions and price caps, FIDs and upstream capex). Every other desk
+does the same for its own market: LME/SHFE warehouse stocks, TC/RC and AISC for metals; ISO capacity
+auctions, rate cases and interconnection queues for power; the Baltic indices, Worldscale and canal
+transits for shipping; deposit betas, CET1 and stress tests for finance; HBM, advanced packaging and
+export licences for technology; rate-on-line, reserve development and cat bond spreads for insurance.
 
 Expansion prompts are server-side only and are never sent to the browser. A sector enabled without a
 bespoke prompt falls back to a generated sector-level prompt, and a Gemini failure degrades to
