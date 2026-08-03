@@ -18,8 +18,8 @@ Sector: TypeAlias = dict[str, Any]
 
 
 # Web UI uses this to replace stale sector topics in localStorage. Increment **every** time
-# you add/remove/reorder/edit entries in any sector's topic list.
-SECTOR_TOPICS_REVISION: int = 2
+# you add/remove/reorder/edit entries in any sector's topic list (or change which desks are enabled/labeled).
+SECTOR_TOPICS_REVISION: int = 3
 
 
 def safe_sector_topics_revision() -> int:
@@ -659,8 +659,8 @@ INSURANCE_TOPICS: list[SectorTopic] = [
 ]
 
 
-# Ordered registry driving the sector tile grid. Disabled sectors render as
-# "coming soon" tiles and carry no topics.
+# Ordered registry driving the sector tile grid. Disabled sectors are omitted from
+# ``list_sectors()`` (hidden in the UI) and cannot be searched until re-enabled.
 SECTORS: list[Sector] = [
     {
         "id": "energy",
@@ -672,7 +672,7 @@ SECTORS: list[Sector] = [
     },
     {
         "id": "utilities_power",
-        "label": "Utilities & Power",
+        "label": "Power",
         "description": "Power prices, grid capacity and generation mix",
         "enabled": True,
         "topics": UTILITIES_POWER_TOPICS,
@@ -687,10 +687,18 @@ SECTORS: list[Sector] = [
         "expansion_prompt": SHIPPING_FREIGHT_EXPANSION_PROMPT,
     },
     {
+        "id": "metals_mining",
+        "label": "Metals",
+        "description": "Base and precious metals, mine supply and processing",
+        "enabled": True,
+        "topics": METALS_MINING_TOPICS,
+        "expansion_prompt": METALS_MINING_EXPANSION_PROMPT,
+    },
+    {
         "id": "finance",
         "label": "Finance",
         "description": "Banks, rates, credit quality and capital markets",
-        "enabled": True,
+        "enabled": False,
         "topics": FINANCE_TOPICS,
         "expansion_prompt": FINANCE_EXPANSION_PROMPT,
     },
@@ -698,7 +706,7 @@ SECTORS: list[Sector] = [
         "id": "technology",
         "label": "Technology",
         "description": "AI capex, semis, cloud and software demand",
-        "enabled": True,
+        "enabled": False,
         "topics": TECHNOLOGY_TOPICS,
         "expansion_prompt": TECHNOLOGY_EXPANSION_PROMPT,
     },
@@ -706,17 +714,9 @@ SECTORS: list[Sector] = [
         "id": "insurance",
         "label": "Insurance",
         "description": "Catastrophes, pricing cycle, reserves and reinsurance",
-        "enabled": True,
+        "enabled": False,
         "topics": INSURANCE_TOPICS,
         "expansion_prompt": INSURANCE_EXPANSION_PROMPT,
-    },
-    {
-        "id": "metals_mining",
-        "label": "Metals & Mining",
-        "description": "Base and precious metals, mine supply and processing",
-        "enabled": True,
-        "topics": METALS_MINING_TOPICS,
-        "expansion_prompt": METALS_MINING_EXPANSION_PROMPT,
     },
 ]
 
@@ -776,7 +776,7 @@ def get_sector_expansion_prompt(sector_id: str) -> str:
 
 
 def list_sectors() -> list[Sector]:
-    """Return tile metadata for every sector, with topic counts instead of payloads."""
+    """Return tile metadata for enabled sectors only (disabled desks stay hidden)."""
     return [
         {
             "id": sector["id"],
@@ -786,6 +786,7 @@ def list_sectors() -> list[Sector]:
             "topic_count": len(sector["topics"]),
         }
         for sector in SECTORS
+        if sector["enabled"]
     ]
 
 

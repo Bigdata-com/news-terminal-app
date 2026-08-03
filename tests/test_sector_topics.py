@@ -23,6 +23,8 @@ ALL_TOPICS: list[tuple[str, dict[str, str]]] = [
     (sector["id"], topic) for sector in SECTORS for topic in sector["topics"]
 ]
 SECTOR_IDS: list[str] = [sector["id"] for sector in SECTORS]
+ENABLED_SECTOR_IDS: list[str] = [sector["id"] for sector in SECTORS if sector["enabled"]]
+HIDDEN_SECTOR_IDS: list[str] = [sector["id"] for sector in SECTORS if not sector["enabled"]]
 
 DISABLED_SECTOR: list[dict[str, object]] = [
     {
@@ -86,11 +88,12 @@ def test_topic_names_are_usable_as_tab_labels(sector_id: str, topic: dict[str, s
 @pytest.mark.parametrize("sector_id", SECTOR_IDS)
 def test_topic_texts_are_unique_within_a_sector(sector_id: str) -> None:
     """Duplicate phrases waste a search slot and add nothing after deduplication."""
-    texts = [topic["topic_text"] for topic in get_sector(sector_id)["topics"]]
+    sector = next(entry for entry in SECTORS if entry["id"] == sector_id)
+    texts = [topic["topic_text"] for topic in sector["topics"]]
     assert len(texts) == len(set(texts))
 
 
-@pytest.mark.parametrize("sector_id", SECTOR_IDS)
+@pytest.mark.parametrize("sector_id", ENABLED_SECTOR_IDS)
 def test_enabled_sectors_have_topics_and_a_prompt(sector_id: str) -> None:
     sector = get_sector(sector_id)
 
@@ -122,24 +125,35 @@ def test_get_sector_raises_for_unknown_sector() -> None:
 def test_list_sectors_exposes_tile_metadata_without_payloads() -> None:
     listed = list_sectors()
 
-    assert len(listed) == len(SECTORS)
+    assert len(listed) == len(ENABLED_SECTOR_IDS)
+    assert [entry["id"] for entry in listed] == ENABLED_SECTOR_IDS
     for entry in listed:
         assert set(entry) == {"id", "label", "description", "enabled", "topic_count"}
+        assert entry["enabled"] is True
 
     by_id = {entry["id"]: entry for entry in listed}
-    assert by_id["energy"]["enabled"] is True
     assert by_id["energy"]["topic_count"] == len(ENERGY_TOPICS)
+    assert by_id["utilities_power"]["label"] == "Power"
+    assert by_id["metals_mining"]["label"] == "Metals"
 
 
-def test_disabled_sectors_have_no_topics(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Placeholder tiles render as "coming soon" and must not ship phrases."""
+def test_disabled_sectors_are_hidden_from_list_sectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled desks stay in the registry but are omitted from the tile API."""
     monkeypatch.setattr(sector_topics_module, "SECTORS", DISABLED_SECTOR)
 
     listed = sector_topics_module.list_sectors()
 
-    assert listed[0]["enabled"] is False
-    assert listed[0]["topic_count"] == 0
+    assert listed == []
     assert sector_topics_module.default_topics_by_sector() == {}
+
+
+def test_hidden_desks_remain_registered_but_disabled() -> None:
+    assert set(HIDDEN_SECTOR_IDS) == {"finance", "technology", "insurance"}
+    for sector_id in HIDDEN_SECTOR_IDS:
+        with pytest.raises(UnknownSectorError, match="not available yet"):
+            get_sector(sector_id)
 
 
 def test_sector_ids_are_unique() -> None:
@@ -165,6 +179,12 @@ def test_expected_sector_desks_are_registered() -> None:
         "insurance",
     }
     assert expected.issubset(set(SECTOR_IDS))
+    assert ENABLED_SECTOR_IDS == [
+        "energy",
+        "utilities_power",
+        "shipping_freight",
+        "metals_mining",
+    ]
 
 
 def test_energy_expansion_prompt_is_desk_specific() -> None:
@@ -182,9 +202,6 @@ def test_energy_expansion_prompt_is_desk_specific() -> None:
         ("metals_mining", ("LME", "iron ore", "AISC", "smelter")),
         ("utilities_power", ("PJM", "ERCOT", "capacity auction", "rate case")),
         ("shipping_freight", ("Baltic Dry Index", "Worldscale", "Panama Canal", "VLSFO")),
-        ("finance", ("net interest", "CET1", "FOMC", "private credit")),
-        ("technology", ("hyperscaler", "HBM", "foundry", "export controls")),
-        ("insurance", ("combined", "rate-on-line", "catastrophe bond", "medical loss")),
     ],
 )
 def test_sector_expansion_prompts_carry_desk_vocabulary(
@@ -195,7 +212,7 @@ def test_sector_expansion_prompts_carry_desk_vocabulary(
         assert term.lower() in prompt.lower()
 
 
-@pytest.mark.parametrize("sector_id", SECTOR_IDS)
+@pytest.mark.parametrize("sector_id", ENABLED_SECTOR_IDS)
 def test_expansion_prompts_have_no_company_placeholder(sector_id: str) -> None:
     prompt = get_sector_expansion_prompt(sector_id)
     assert "{company}" not in prompt
