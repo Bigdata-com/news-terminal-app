@@ -21,7 +21,13 @@ from contextlib import asynccontextmanager
 from services import price_service
 from services.topic_search_service import TopicSearchService
 from services.report_service import ReportService
-from config.topics import DEFAULT_TOPICS, list_available_configs, safe_default_topics_revision
+from config.topics import (
+    DEFAULT_TOPICS,
+    NEGATIVE_NEWS_CATEGORIES,
+    list_available_configs,
+    safe_default_topics_revision,
+    safe_negative_news_categories_revision,
+)
 from config.sector_topics import (
     UnknownSectorError,
     default_topics_by_sector,
@@ -31,7 +37,6 @@ from config.sector_topics import (
     safe_sector_topics_revision,
 )
 
-
 # Pydantic models for request bodies
 class TopicItem(BaseModel):
     """A single topic with name and text template"""
@@ -39,12 +44,22 @@ class TopicItem(BaseModel):
     topic_text: str
 
 
+class NegativeCategoryItem(BaseModel):
+    """A negative-news category with Bigdata taxonomy topic strings"""
+    category_name: str
+    topics: List[str]
+
+
 class NewsSearchRequest(BaseModel):
     """Request body for news search endpoint"""
     days: int = Field(default=7, description="Number of days to look back")
     basic_search: bool = Field(default=False, description="If true, use basic search without topics")
+    negative_news: bool = Field(default=False, description="If true, run negative taxonomy news search")
     relevance: float = Field(default=0.1, description="Minimum relevance threshold (0.0-1.0)")
     topics: Optional[List[TopicItem]] = Field(default=None, description="Custom topics for search")
+    negative_categories: Optional[List[NegativeCategoryItem]] = Field(
+        default=None, description="Custom negative-news taxonomy categories"
+    )
     since_minutes: Optional[int] = Field(default=None, description="For incremental refresh: only fetch last N minutes")
     query_reformulation: bool = Field(default=False, description="Enable AI query expansion")
 
@@ -67,8 +82,12 @@ class NewsMultiSearchRequest(BaseModel):
     tickers: List[str] = Field(..., description="List of ticker symbols")
     days: int = Field(default=7, description="Number of days to look back")
     basic_search: bool = Field(default=False, description="If true, use basic search without topics")
+    negative_news: bool = Field(default=False, description="If true, run negative taxonomy news search")
     relevance: float = Field(default=0.1, description="Minimum relevance threshold (0.0-1.0)")
     topics: Optional[List[TopicItem]] = Field(default=None, description="Custom topics for search")
+    negative_categories: Optional[List[NegativeCategoryItem]] = Field(
+        default=None, description="Custom negative-news taxonomy categories"
+    )
     since_minutes: Optional[int] = Field(default=None, description="For incremental refresh: only fetch last N minutes")
     query_reformulation: bool = Field(default=False, description="Enable AI query expansion")
 
@@ -375,6 +394,12 @@ async def sector_page():
     """Serve the sector terminal interface"""
     return serve_static_page("sector.html")
 
+
+@app.get("/how-it-works", response_class=HTMLResponse)
+async def how_it_works_page():
+    """Serve the standalone How it works documentation page"""
+    return serve_static_page("how-it-works.html")
+
 @app.post("/api/news/{ticker}")
 async def get_news(
     ticker: str,
@@ -383,15 +408,18 @@ async def get_news(
     """
     Get news for a ticker (POST request with JSON body).
     
-    Two modes:
+    Modes:
+    - negative_news=true: Taxonomy topic filters + negative sentiment (news_public)
     - basic_search=true: Entity-filtered baseline search (no topics, no sentiment filter)
-    - basic_search=false: Topic-based search with sentiment filtering (default)
+    - default: Topic-based search with sentiment filtering
     
     Request body parameters:
     - days: Number of days to look back (default: 7)
-    - basic_search: If true, only run baseline search (no topics); if false, run topic searches
+    - basic_search: If true, only run baseline search (no topics)
+    - negative_news: If true, run negative taxonomy news search
     - relevance: Minimum relevance threshold (0.0-1.0)
     - topics: Array of topic objects with topic_name and topic_text (only for topic search)
+    - negative_categories: Custom negative-news categories (category_name + taxonomy topics)
     - since_minutes: If provided, only fetch articles from the last N minutes (incremental refresh)
     - query_reformulation: If true, generate 3 variations for each topic using Gemini AI (4x searches)
     """
@@ -399,8 +427,10 @@ async def get_news(
     # Extract values from request body
     days = request.days
     basic_search = request.basic_search
+    negative_news = request.negative_news
     relevance = request.relevance
     topics = request.topics
+    negative_categories = request.negative_categories
     since_minutes = request.since_minutes
     query_reformulation = request.query_reformulation
     
@@ -419,12 +449,59 @@ async def get_news(
             lookback_days = since_minutes / (60 * 24)
             # Add 1 minute buffer to avoid missing articles on boundary
             lookback_days = max(lookback_days, 1 / (60 * 24))  # Minimum 1 minute
-            logger.info(f"API request for news: {ticker} (INCREMENTAL: last {since_minutes} minutes, basic={basic_search})")
+            logger.info(
+                f"API request for news: {ticker} (INCREMENTAL: last {since_minutes} minutes, "
+                f"basic={basic_search}, negative={negative_news})"
+            )
         else:
             # Regular full fetch
             lookback_days = days
-            logger.info(f"API request for news: {ticker} (FULL: {days} days, basic={basic_search})")
+            logger.info(
+                f"API request for news: {ticker} (FULL: {days} days, "
+                f"basic={basic_search}, negative={negative_news})"
+            )
         
+        if negative_news:
+            custom_categories = None
+            if negative_categories:
+                custom_categories = [
+                    {"category_name": c.category_name, "topics": c.topics}
+                    for c in negative_categories
+                ]
+                logger.info(f"Using {len(custom_categories)} custom negative categories")
+
+            results = await topic_search_service.search_negative_news(
+                ticker,
+                lookback_days,
+                custom_categories=custom_categories,
+                min_relevance=relevance,
+            )
+
+            if "error" in results:
+                raise HTTPException(status_code=404, detail=results["error"])
+
+            return {
+                "ticker": results["ticker"],
+                "company_name": results.get("company_name"),
+                "entity_id": results.get("entity_id"),
+                "baseline_results": [],
+                "topic_results": results["topic_results"],
+                "total_results": results["total_results"],
+                "counts": {
+                    "baseline": 0,
+                    "topics": len(results["topic_results"]),
+                    "total": results["total_results"],
+                },
+                "search_stats": results.get("search_stats", {}),
+                "settings": {
+                    "basic_search": basic_search,
+                    "negative_news": True,
+                    "days": days,
+                    "relevance": relevance,
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
         # Handle basic_search vs topic_search separately
         if basic_search:
             # Basic search: call search_baseline directly
@@ -461,6 +538,7 @@ async def get_news(
                 },
                 "settings": {
                     "basic_search": basic_search,
+                    "negative_news": False,
                     "days": days,
                     "relevance": relevance
                 },
@@ -501,6 +579,7 @@ async def get_news(
                 "search_stats": results.get("search_stats", {}),
                 "settings": {
                     "basic_search": basic_search,
+                    "negative_news": False,
                     "days": days,
                     "relevance": relevance
                 },
@@ -518,16 +597,19 @@ async def get_news_multi(request: NewsMultiSearchRequest):
     """
     Get news for multiple tickers (POST request with JSON body).
     
-    Two modes:
+    Modes:
+    - negative_news=true: Taxonomy topic filters + negative sentiment (entity batches of max 5)
     - basic_search=true: Entity-filtered baseline search for each ticker (no topics)
-    - basic_search=false: Topic-based search for each ticker (default)
+    - default: Topic-based search for each ticker
     
     Request body parameters:
     - tickers: Array of ticker symbols
     - days: Number of days to look back (default: 7)
-    - basic_search: If true, only run baseline searches; if false, run topic searches
+    - basic_search: If true, only run baseline searches
+    - negative_news: If true, run negative taxonomy news search
     - relevance: Minimum relevance threshold (0.0-1.0)
     - topics: Array of topic objects with topic_name and topic_text
+    - negative_categories: Custom negative-news categories
     - since_minutes: If provided, only fetch articles from the last N minutes (incremental refresh)
     - query_reformulation: If true, generate 3 variations for each topic using Gemini AI (4x searches)
     """
@@ -535,8 +617,10 @@ async def get_news_multi(request: NewsMultiSearchRequest):
     # Extract values from request body
     days = request.days
     basic_search = request.basic_search
+    negative_news = request.negative_news
     relevance = request.relevance
     topics = request.topics
+    negative_categories = request.negative_categories
     since_minutes = request.since_minutes
     query_reformulation = request.query_reformulation
     
@@ -559,14 +643,36 @@ async def get_news_multi(request: NewsMultiSearchRequest):
             lookback_days = since_minutes / (60 * 24)
             # Add 1 minute buffer to avoid missing articles on boundary
             lookback_days = max(lookback_days, 1 / (60 * 24))  # Minimum 1 minute
-            logger.info(f"API request for multiple tickers: {', '.join(ticker_list)} (INCREMENTAL: last {since_minutes} minutes, basic={basic_search})")
+            logger.info(
+                f"API request for multiple tickers: {', '.join(ticker_list)} "
+                f"(INCREMENTAL: last {since_minutes} minutes, basic={basic_search}, negative={negative_news})"
+            )
         else:
             # Regular full fetch
             lookback_days = days
-            logger.info(f"API request for multiple tickers: {', '.join(ticker_list)} (FULL: {days} days, basic={basic_search})")
+            logger.info(
+                f"API request for multiple tickers: {', '.join(ticker_list)} "
+                f"(FULL: {days} days, basic={basic_search}, negative={negative_news})"
+            )
         
-        # Handle basic_search vs topic_search separately
-        if basic_search:
+        if negative_news:
+            custom_categories = None
+            if negative_categories:
+                custom_categories = [
+                    {"category_name": c.category_name, "topics": c.topics}
+                    for c in negative_categories
+                ]
+                logger.info(f"Using {len(custom_categories)} custom negative categories")
+
+            results_list = await topic_search_service.search_negative_news_multiple(
+                ticker_list,
+                lookback_days,
+                custom_categories=custom_categories,
+                min_relevance=relevance,
+            )
+            for result in results_list:
+                result["baseline_results"] = []
+        elif basic_search:
             # Basic search: call search_baseline for each ticker
             results_list = []
             for ticker in ticker_list:
@@ -662,6 +768,7 @@ async def get_news_multi(request: NewsMultiSearchRequest):
             "rate_limiter_stats": rate_stats,
             "settings": {
                 "basic_search": basic_search,
+                "negative_news": negative_news,
                 "days": days,
                 "relevance": relevance
             },
@@ -949,12 +1056,15 @@ async def generate_commentary(news_data: Dict):
 
 @app.get("/api/config")
 async def get_config():
-    """Get default configuration including topics"""
+    """Get default configuration including topics and negative-news categories"""
     return {
         "default_topics": DEFAULT_TOPICS,
         "default_topics_revision": safe_default_topics_revision(),
+        "negative_news_categories": NEGATIVE_NEWS_CATEGORIES,
+        "negative_news_categories_revision": safe_negative_news_categories_revision(),
         "available_configs": list_available_configs(),
         "topic_count": len(DEFAULT_TOPICS),
+        "negative_category_count": len(NEGATIVE_NEWS_CATEGORIES),
         "commentary_available": report_service is not None
     }
 

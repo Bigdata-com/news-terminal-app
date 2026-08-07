@@ -796,6 +796,35 @@ button:focus,
     background: rgba(88, 166, 255, 0.05);
 }
 
+/* Relevance Filter */
+.relevance-filter-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: #6e7681;
+}
+
+.relevance-filter-select {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 6px 8px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+.relevance-filter-select:hover,
+.relevance-filter-select:focus {
+    border-color: #58a6ff;
+    color: #58a6ff;
+    outline: none;
+}
+
 /* Checkbox Label */
 .filter-checkbox-label {
     display: flex;

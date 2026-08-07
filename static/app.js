@@ -13,11 +13,19 @@ let defaultTopicsConfigLoadedOk = false;
  */
 let defaultTopicsRevisionFromServer = null;
 
+// Default negative-news categories - loaded from backend
+let DEFAULT_NEGATIVE_CATEGORIES = [];
+let defaultNegativeCategoriesConfigLoadedOk = false;
+let defaultNegativeCategoriesRevisionFromServer = null;
+
 // Settings object (default: 7 days, Topics ON, Reformulation OFF)
 let searchSettings = {
-    allNews: false, // If true, use basic search (no topics) - default OFF means selective ON
+    searchMode: 'topic', // 'topic' | 'negative' | 'all'
+    allNews: false, // If true, use basic search (no topics) - derived from searchMode
     topics: [],
+    negativeCategories: [],
     days: 7, // Default 7 days (1 week)
+    relevance: 0.1, // Minimum relevance threshold applied to every search mode
     queryReformulation: false, // Default OFF - generates 3 variations per topic using Gemini AI
     autoRefresh: false // Default OFF - auto-refresh news every minute
 };
@@ -26,6 +34,7 @@ let searchSettings = {
 let currentTopicFilter = 'all'; // 'all' or topic name
 let allNewsData = null; // Store all news data for filtering
 let originalTopics = null; // Store original topics to detect changes
+let originalNegativeCategories = null;
 let lastRefreshTime = null; // Track last refresh timestamp for incremental updates
 
 // Commentary state
@@ -129,10 +138,11 @@ async function getNews(isRefresh = false) {
         
         // Build request body
         const requestBody = {
-            basic_search: searchSettings.allNews,
-            relevance: 0.1, // Default minimum relevance threshold
+            basic_search: searchSettings.searchMode === 'all',
+            negative_news: searchSettings.searchMode === 'negative',
+            relevance: getRelevanceSetting(),
             days: searchSettings.days,
-            query_reformulation: searchSettings.queryReformulation
+            query_reformulation: searchSettings.searchMode === 'topic' && searchSettings.queryReformulation
         };
         
         // On refresh, only fetch articles since last refresh (incremental update)
@@ -143,9 +153,13 @@ async function getNews(isRefresh = false) {
             console.log(`Incremental refresh: fetching last ${minutesSinceLastRefresh} minutes of news`);
         }
         
-        // Add custom topics if not using basic search
-        if (!searchSettings.allNews && searchSettings.topics.length > 0) {
+        // Add custom topics if topic mode
+        if (searchSettings.searchMode === 'topic' && searchSettings.topics.length > 0) {
             requestBody.topics = searchSettings.topics;
+        }
+        // Add negative categories if negative mode
+        if (searchSettings.searchMode === 'negative' && searchSettings.negativeCategories.length > 0) {
+            requestBody.negative_categories = searchSettings.negativeCategories;
         }
         
         if (isMultipleTickers) {
@@ -852,24 +866,33 @@ async function generateCommentary() {
     try {
         // STEP 1: Fetch FULL news data (not incremental) for commentary
         const requestBody = {
-            basic_search: searchSettings.allNews,
-            relevance: 0.1,
+            basic_search: searchSettings.searchMode === 'all',
+            negative_news: searchSettings.searchMode === 'negative',
+            relevance: getRelevanceSetting(),
             days: searchSettings.days,
-            query_reformulation: searchSettings.queryReformulation
+            query_reformulation: searchSettings.searchMode === 'topic' && searchSettings.queryReformulation
         };
         
-        // Add custom topics if not using basic search
-        if (!searchSettings.allNews && searchSettings.topics.length > 0) {
+        if (searchSettings.searchMode === 'topic' && searchSettings.topics.length > 0) {
             requestBody.topics = searchSettings.topics;
+        }
+        if (searchSettings.searchMode === 'negative' && searchSettings.negativeCategories.length > 0) {
+            requestBody.negative_categories = searchSettings.negativeCategories;
         }
         
         // Calculate expected API calls for progress indication
-        const topicCount = searchSettings.topics.length;
-        const expectedCalls = searchSettings.queryReformulation ? topicCount * 4 : topicCount;
+        const topicCount = searchSettings.searchMode === 'negative'
+            ? searchSettings.negativeCategories.length
+            : searchSettings.topics.length;
+        const expectedCalls = (searchSettings.searchMode === 'topic' && searchSettings.queryReformulation)
+            ? topicCount * 4
+            : topicCount;
         const estimatedMinutes = Math.ceil(expectedCalls / 20); // Rough estimate at ~20 calls/min with rate limiting
         
         console.log('Fetching full news data for commentary generation...');
-        commentaryStatus.textContent = `Searching ${topicCount} topics (${expectedCalls} API calls, ~${estimatedMinutes} min)...`;
+        commentaryStatus.textContent = searchSettings.searchMode === 'negative'
+            ? `Searching ${topicCount} negative categories (~${estimatedMinutes} min)...`
+            : `Searching ${topicCount} topics (${expectedCalls} API calls, ~${estimatedMinutes} min)...`;
         
         // Use extended timeout for long-running topic searches (5 minutes)
         const newsResponse = await fetchWithTimeout(
@@ -1194,14 +1217,20 @@ function normalizeServerTopicsRevision(rev) {
 /** First-run defaults; topic revision is set only when /api/config loaded successfully. */
 function buildDefaultSearchSettings() {
     const s = {
+        searchMode: 'topic',
         allNews: false,
         topics: [...DEFAULT_TOPICS],
+        negativeCategories: [...DEFAULT_NEGATIVE_CATEGORIES],
         days: 7,
+        relevance: 0.1,
         queryReformulation: false,
         autoRefresh: false
     };
     if (defaultTopicsConfigLoadedOk && defaultTopicsRevisionFromServer != null) {
         s.defaultTopicsRevision = defaultTopicsRevisionFromServer;
+    }
+    if (defaultNegativeCategoriesConfigLoadedOk && defaultNegativeCategoriesRevisionFromServer != null) {
+        s.negativeCategoriesRevision = defaultNegativeCategoriesRevisionFromServer;
     }
     return s;
 }
@@ -1225,9 +1254,11 @@ function archiveCorruptSettingsSnapshot(raw) {
 }
 
 async function loadDefaultTopics() {
-    // Load default topics from backend
+    // Load default topics and negative categories from backend
     defaultTopicsConfigLoadedOk = false;
     defaultTopicsRevisionFromServer = null;
+    defaultNegativeCategoriesConfigLoadedOk = false;
+    defaultNegativeCategoriesRevisionFromServer = null;
     try {
         const response = await fetch('/api/config');
         const data = await response.json();
@@ -1254,6 +1285,27 @@ async function loadDefaultTopics() {
                 topic_text: "What key takeaways emerged from {company}'s latest earnings report?"
             }];
         }
+
+        if (
+            response.ok &&
+            data.negative_news_categories &&
+            Array.isArray(data.negative_news_categories) &&
+            data.negative_news_categories.length > 0
+        ) {
+            DEFAULT_NEGATIVE_CATEGORIES = data.negative_news_categories;
+            defaultNegativeCategoriesRevisionFromServer = normalizeServerTopicsRevision(
+                data.negative_news_categories_revision
+            );
+            defaultNegativeCategoriesConfigLoadedOk = true;
+            console.log(
+                `Loaded ${DEFAULT_NEGATIVE_CATEGORIES.length} negative categories from backend (revision ${
+                    defaultNegativeCategoriesRevisionFromServer ?? 'none'
+                })`
+            );
+        } else {
+            console.error('Failed to load negative categories from backend');
+            DEFAULT_NEGATIVE_CATEGORIES = [];
+        }
     } catch (error) {
         console.error('Error loading default topics:', error);
         // Fallback to minimal topics if backend fails
@@ -1261,6 +1313,7 @@ async function loadDefaultTopics() {
             topic_name: "Earnings",
             topic_text: "What key takeaways emerged from {company}'s latest earnings report?"
         }];
+        DEFAULT_NEGATIVE_CATEGORIES = [];
     }
 }
 
@@ -1279,6 +1332,22 @@ function syncStoredTopicsToServerRevision() {
         'Replaced cached topics with server defaults (revision ' +
             serverRev +
             '). Clear localStorage or use Reset if you need to force-refresh again.'
+    );
+}
+
+function syncStoredNegativeCategoriesToServerRevision() {
+    if (!defaultNegativeCategoriesConfigLoadedOk || defaultNegativeCategoriesRevisionFromServer == null) {
+        return;
+    }
+    const serverRev = defaultNegativeCategoriesRevisionFromServer;
+    if (searchSettings.negativeCategoriesRevision === serverRev) {
+        return;
+    }
+    searchSettings.negativeCategories = JSON.parse(JSON.stringify(DEFAULT_NEGATIVE_CATEGORIES));
+    searchSettings.negativeCategoriesRevision = serverRev;
+    saveSettingsToStorage();
+    console.log(
+        'Replaced cached negative categories with server defaults (revision ' + serverRev + ').'
     );
 }
 
@@ -1310,9 +1379,30 @@ function loadSettings() {
             }
             // Replace localStorage topics when server default set changed (topics.py revision bump)
             syncStoredTopicsToServerRevision();
+
+            // Migrate / ensure searchMode
+            if (!searchSettings.searchMode) {
+                searchSettings.searchMode = searchSettings.allNews ? 'all' : 'topic';
+            }
+            searchSettings.allNews = searchSettings.searchMode === 'all';
+
+            // Ensure negative categories exist
+            if (!searchSettings.negativeCategories || searchSettings.negativeCategories.length === 0) {
+                searchSettings.negativeCategories = JSON.parse(JSON.stringify(DEFAULT_NEGATIVE_CATEGORIES));
+                if (defaultNegativeCategoriesConfigLoadedOk && defaultNegativeCategoriesRevisionFromServer != null) {
+                    searchSettings.negativeCategoriesRevision = defaultNegativeCategoriesRevisionFromServer;
+                }
+                saveSettingsToStorage();
+            }
+            syncStoredNegativeCategoriesToServerRevision();
+
             // Ensure days field exists (default 7)
             if (!searchSettings.days) {
                 searchSettings.days = 7;
+            }
+            // Ensure relevance threshold exists (default 0.1)
+            if (typeof searchSettings.relevance !== 'number' || !isFinite(searchSettings.relevance)) {
+                searchSettings.relevance = 0.1;
             }
             // Ensure queryReformulation field exists (default false)
             if (searchSettings.queryReformulation === undefined) {
@@ -1374,21 +1464,8 @@ function parseUrlParameters() {
 // ============================================================================
 
 function initializeFilters() {
-    const advancedGroup = document.querySelector('.filter-group.advanced-options');
-    const advancedDivider = document.querySelector('.filter-divider.advanced-options');
-    
-    // Set search mode buttons and show/hide advanced options
-    if (searchSettings.allNews) {
-        document.getElementById('allModeBtn').classList.add('active');
-        document.getElementById('topicModeBtn').classList.remove('active');
-        if (advancedGroup) advancedGroup.style.display = 'none';
-        if (advancedDivider) advancedDivider.style.display = 'none';
-    } else {
-        document.getElementById('topicModeBtn').classList.add('active');
-        document.getElementById('allModeBtn').classList.remove('active');
-        if (advancedGroup) advancedGroup.style.display = 'flex';
-        if (advancedDivider) advancedDivider.style.display = 'block';
-    }
+    // Restore mode UI from settings
+    applySearchModeUI(searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic'));
     
     // Set date filter buttons
     document.querySelectorAll('.date-btn').forEach(btn => {
@@ -1399,6 +1476,12 @@ function initializeFilters() {
             btn.classList.remove('active');
         }
     });
+    
+    // Set relevance dropdown
+    const relevanceSelect = document.getElementById('relevanceFilter');
+    if (relevanceSelect) {
+        relevanceSelect.value = String(getRelevanceSetting());
+    }
     
     // Set AI expansion checkbox
     document.getElementById('reformulateToggle').checked = searchSettings.queryReformulation;
@@ -1419,9 +1502,11 @@ function initializeFilters() {
         });
     });
     
-    // Initialize topics edit panel
+    // Initialize topics / categories edit panels
     renderTopicsInputList();
     updateTopicsCount();
+    renderNegativeCategoriesInputList();
+    updateNegativeCategoriesCount();
     
     // Initialize topic tabs
     renderTopicTabs();
@@ -1437,27 +1522,73 @@ function updateFilters() {
     console.log('Filters updated:', searchSettings);
 }
 
-function setSearchMode(mode) {
+/** Minimum relevance threshold shared by topic, negative and all-news searches. */
+function getRelevanceSetting() {
+    const value = Number(searchSettings.relevance);
+    if (!isFinite(value) || value < 0 || value > 1) {
+        return 0.1;
+    }
+    return value;
+}
+
+function updateRelevanceFilter() {
+    const select = document.getElementById('relevanceFilter');
+    if (!select) return;
+    
+    searchSettings.relevance = Number(select.value);
+    saveSettingsToStorage();
+    console.log('Relevance threshold updated:', searchSettings.relevance);
+    
+    if (currentTicker) {
+        getNews();
+    }
+}
+
+function applySearchModeUI(mode) {
     const topicBtn = document.getElementById('topicModeBtn');
+    const negativeBtn = document.getElementById('negativeModeBtn');
     const allBtn = document.getElementById('allModeBtn');
     const advancedGroup = document.querySelector('.filter-group.advanced-options');
     const advancedDivider = document.querySelector('.filter-divider.advanced-options');
-    
+    const editWrapper = document.getElementById('topicsDropdownWrapper');
+    const editLabel = document.getElementById('editPanelLabel');
+    const tabsLabel = document.querySelector('.topic-tabs-label');
+
+    topicBtn.classList.toggle('active', mode === 'topic');
+    if (negativeBtn) negativeBtn.classList.toggle('active', mode === 'negative');
+    allBtn.classList.toggle('active', mode === 'all');
+
     if (mode === 'topic') {
-        topicBtn.classList.add('active');
-        allBtn.classList.remove('active');
-        searchSettings.allNews = false;
         if (advancedGroup) advancedGroup.style.display = 'flex';
         if (advancedDivider) advancedDivider.style.display = 'block';
-        console.log('Search mode: Topic-Based');
-    } else {
-        topicBtn.classList.remove('active');
-        allBtn.classList.add('active');
-        searchSettings.allNews = true;
+        if (editWrapper) editWrapper.style.display = 'flex';
+        if (editLabel) editLabel.textContent = 'Edit Topics';
+        if (tabsLabel) tabsLabel.textContent = 'TOPICS:';
+    } else if (mode === 'negative') {
         if (advancedGroup) advancedGroup.style.display = 'none';
         if (advancedDivider) advancedDivider.style.display = 'none';
-        console.log('Search mode: All News');
+        if (editWrapper) editWrapper.style.display = 'flex';
+        if (editLabel) editLabel.textContent = 'Edit Categories';
+        if (tabsLabel) tabsLabel.textContent = 'CATEGORIES:';
+    } else {
+        if (advancedGroup) advancedGroup.style.display = 'none';
+        if (advancedDivider) advancedDivider.style.display = 'none';
+        if (editWrapper) editWrapper.style.display = 'none';
+        closeTopicsPanel();
+        closeNegativeCategoriesPanel();
+        if (tabsLabel) tabsLabel.textContent = 'TOPICS:';
     }
+}
+
+function setSearchMode(mode) {
+    searchSettings.searchMode = mode;
+    searchSettings.allNews = mode === 'all';
+    applySearchModeUI(mode);
+    closeTopicsPanel();
+    closeNegativeCategoriesPanel();
+    renderTopicTabs();
+    saveSettingsToStorage();
+    console.log('Search mode:', mode);
 }
 
 function toggleSelective() {
@@ -1492,25 +1623,33 @@ function toggleReformulate() {
 
 function updateTopicsDropdownVisibility() {
     const topicsWrapper = document.getElementById('topicsDropdownWrapper');
-    const selectiveOn = !searchSettings.allNews;
+    const mode = searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic');
     
-    if (selectiveOn) {
-        topicsWrapper.style.display = 'flex';
-    } else {
-        topicsWrapper.style.display = 'none';
-        // Also close panel if it's open
+    if (mode === 'all') {
+        if (topicsWrapper) topicsWrapper.style.display = 'none';
         closeTopicsPanel();
+        closeNegativeCategoriesPanel();
+    } else {
+        if (topicsWrapper) topicsWrapper.style.display = 'flex';
+    }
+}
+
+function toggleEditPanel() {
+    const mode = searchSettings.searchMode || 'topic';
+    if (mode === 'negative') {
+        toggleNegativeCategoriesPanel();
+    } else {
+        toggleTopicsPanel();
     }
 }
 
 function toggleTopicsPanel() {
     const panel = document.getElementById('topicsPanel');
-    const button = document.getElementById('topicsDropdown');
-    const arrow = document.getElementById('topicsArrow');
     
     if (panel.classList.contains('active')) {
         closeTopicsPanel();
     } else {
+        closeNegativeCategoriesPanel();
         openTopicsPanel();
     }
 }
@@ -1518,11 +1657,9 @@ function toggleTopicsPanel() {
 function openTopicsPanel() {
     const panel = document.getElementById('topicsPanel');
     const button = document.getElementById('topicsDropdown');
-    const arrow = document.getElementById('topicsArrow');
     
     if (panel) panel.classList.add('active');
     if (button) button.classList.add('active');
-    if (arrow) arrow.textContent = '▲';
     
     // Store original topics to detect changes later
     originalTopics = JSON.parse(JSON.stringify(searchSettings.topics));
@@ -1534,11 +1671,13 @@ function openTopicsPanel() {
 function closeTopicsPanel() {
     const panel = document.getElementById('topicsPanel');
     const button = document.getElementById('topicsDropdown');
-    const arrow = document.getElementById('topicsArrow');
     
     if (panel) panel.classList.remove('active');
-    if (button) button.classList.remove('active');
-    if (arrow) arrow.textContent = '▼';
+    // Only clear button active if negative panel also closed
+    const negPanel = document.getElementById('negativeCategoriesPanel');
+    if (button && (!negPanel || !negPanel.classList.contains('active'))) {
+        button.classList.remove('active');
+    }
 }
 
 function renderTopicsInputList() {
@@ -1790,6 +1929,215 @@ function saveAndCloseTopics() {
 }
 
 // ============================================================================
+// NEGATIVE CATEGORIES EDITOR
+// ============================================================================
+
+function toggleNegativeCategoriesPanel() {
+    const panel = document.getElementById('negativeCategoriesPanel');
+    if (panel && panel.classList.contains('active')) {
+        closeNegativeCategoriesPanel();
+    } else {
+        closeTopicsPanel();
+        openNegativeCategoriesPanel();
+    }
+}
+
+function openNegativeCategoriesPanel() {
+    const panel = document.getElementById('negativeCategoriesPanel');
+    const button = document.getElementById('topicsDropdown');
+    if (panel) panel.classList.add('active');
+    if (button) button.classList.add('active');
+    originalNegativeCategories = JSON.parse(JSON.stringify(searchSettings.negativeCategories || []));
+    renderNegativeCategoriesInputList();
+}
+
+function closeNegativeCategoriesPanel() {
+    const panel = document.getElementById('negativeCategoriesPanel');
+    const button = document.getElementById('topicsDropdown');
+    if (panel) panel.classList.remove('active');
+    const topicsPanel = document.getElementById('topicsPanel');
+    if (button && (!topicsPanel || !topicsPanel.classList.contains('active'))) {
+        button.classList.remove('active');
+    }
+}
+
+function renderNegativeCategoriesInputList() {
+    const listContainer = document.getElementById('negativeCategoriesInputList');
+    if (!listContainer) return;
+    listContainer.innerHTML = '';
+
+    (searchSettings.negativeCategories || []).forEach((category, catIndex) => {
+        const block = document.createElement('div');
+        block.className = 'topics-input-item';
+        block.style.flexDirection = 'column';
+        block.style.alignItems = 'stretch';
+        block.style.gap = '6px';
+
+        const headerRow = document.createElement('div');
+        headerRow.style.display = 'flex';
+        headerRow.style.alignItems = 'center';
+        headerRow.style.gap = '4px';
+
+        const label = document.createElement('span');
+        label.className = 'topics-input-label';
+        label.textContent = `${catIndex + 1}.`;
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'topics-input-field';
+        nameInput.value = category.category_name || '';
+        nameInput.placeholder = 'Category name...';
+        nameInput.style.flex = '1';
+        nameInput.addEventListener('input', (e) => {
+            searchSettings.negativeCategories[catIndex].category_name = e.target.value;
+        });
+
+        const deleteCatBtn = document.createElement('button');
+        deleteCatBtn.className = 'topics-delete-button';
+        deleteCatBtn.textContent = '×';
+        deleteCatBtn.title = 'Delete category';
+        deleteCatBtn.onclick = () => deleteNegativeCategory(catIndex);
+
+        headerRow.appendChild(label);
+        headerRow.appendChild(nameInput);
+        headerRow.appendChild(deleteCatBtn);
+        block.appendChild(headerRow);
+
+        const topics = category.topics || [];
+        topics.forEach((topicStr, topicIndex) => {
+            const topicRow = document.createElement('div');
+            topicRow.style.display = 'flex';
+            topicRow.style.alignItems = 'center';
+            topicRow.style.gap = '4px';
+            topicRow.style.paddingLeft = '20px';
+
+            const topicInput = document.createElement('input');
+            topicInput.type = 'text';
+            topicInput.className = 'topics-input-field';
+            topicInput.value = topicStr;
+            topicInput.placeholder = 'society,legal,fraud,,';
+            topicInput.style.flex = '1';
+            topicInput.style.fontFamily = 'monospace';
+            topicInput.style.fontSize = '11px';
+            topicInput.addEventListener('input', (e) => {
+                searchSettings.negativeCategories[catIndex].topics[topicIndex] = e.target.value;
+            });
+
+            const deleteTopicBtn = document.createElement('button');
+            deleteTopicBtn.className = 'topics-delete-button';
+            deleteTopicBtn.textContent = '×';
+            deleteTopicBtn.title = 'Delete taxonomy topic';
+            deleteTopicBtn.onclick = () => {
+                searchSettings.negativeCategories[catIndex].topics.splice(topicIndex, 1);
+                renderNegativeCategoriesInputList();
+                updateNegativeCategoriesCount();
+            };
+
+            topicRow.appendChild(topicInput);
+            topicRow.appendChild(deleteTopicBtn);
+            block.appendChild(topicRow);
+        });
+
+        const addTopicBtn = document.createElement('button');
+        addTopicBtn.className = 'topics-add-button';
+        addTopicBtn.textContent = '+ ADD TAXONOMY';
+        addTopicBtn.style.alignSelf = 'flex-start';
+        addTopicBtn.style.marginLeft = '20px';
+        addTopicBtn.onclick = () => {
+            if (!searchSettings.negativeCategories[catIndex].topics) {
+                searchSettings.negativeCategories[catIndex].topics = [];
+            }
+            searchSettings.negativeCategories[catIndex].topics.push('');
+            renderNegativeCategoriesInputList();
+        };
+        block.appendChild(addTopicBtn);
+
+        listContainer.appendChild(block);
+    });
+}
+
+function addNegativeCategory() {
+    if (!searchSettings.negativeCategories) {
+        searchSettings.negativeCategories = [];
+    }
+    searchSettings.negativeCategories.push({
+        category_name: `Category ${searchSettings.negativeCategories.length + 1}`,
+        topics: [''],
+    });
+    renderNegativeCategoriesInputList();
+    updateNegativeCategoriesCount();
+}
+
+function deleteNegativeCategory(index) {
+    searchSettings.negativeCategories.splice(index, 1);
+    renderNegativeCategoriesInputList();
+    updateNegativeCategoriesCount();
+}
+
+function updateNegativeCategoriesCount() {
+    const count = (searchSettings.negativeCategories || []).length;
+    const el = document.getElementById('negativeCountInline');
+    if (el) el.textContent = count;
+}
+
+function resetNegativeCategoriesToDefault() {
+    if (confirm('Reset negative categories to defaults?')) {
+        searchSettings.negativeCategories = JSON.parse(JSON.stringify(DEFAULT_NEGATIVE_CATEGORIES));
+        if (defaultNegativeCategoriesRevisionFromServer != null) {
+            searchSettings.negativeCategoriesRevision = defaultNegativeCategoriesRevisionFromServer;
+        } else {
+            delete searchSettings.negativeCategoriesRevision;
+        }
+        saveSettingsToStorage();
+        renderNegativeCategoriesInputList();
+        updateNegativeCategoriesCount();
+        renderTopicTabs();
+        showNotification('Negative categories reset to defaults');
+    }
+}
+
+function saveAndCloseNegativeCategories() {
+    // Sync from DOM
+    const blocks = document.querySelectorAll('#negativeCategoriesInputList > .topics-input-item');
+    const synced = [];
+    blocks.forEach((block, catIndex) => {
+        const allInputs = block.querySelectorAll('input.topics-input-field');
+        const categoryName = allInputs.length > 0
+            ? allInputs[0].value.trim()
+            : `Category ${catIndex + 1}`;
+        const topics = [];
+        allInputs.forEach((inp, i) => {
+            if (i === 0) return; // name
+            const v = inp.value.trim();
+            if (v) topics.push(v);
+        });
+        if (categoryName && topics.length > 0) {
+            synced.push({ category_name: categoryName, topics });
+        }
+    });
+
+    if (synced.length === 0) {
+        alert('Error: Add at least one category with a name and taxonomy topic string');
+        return;
+    }
+
+    const changed = JSON.stringify(originalNegativeCategories) !== JSON.stringify(synced);
+    searchSettings.negativeCategories = synced;
+    updateNegativeCategoriesCount();
+    saveSettingsToStorage();
+    closeNegativeCategoriesPanel();
+    showNotification('Negative categories saved successfully!');
+    renderTopicTabs();
+
+    if (changed && currentTicker) {
+        const refresh = confirm('Categories saved! Reload news with new categories?');
+        if (refresh) {
+            getNews();
+        }
+    }
+}
+
+// ============================================================================
 // TOPIC TABS FUNCTIONS
 // ============================================================================
 
@@ -1803,61 +2151,51 @@ function renderTopicTabs() {
     
     // Clear existing tabs
     tabsList.innerHTML = '';
-    
-    // Show/hide tabs bar based on SELECTIVE setting
-    if (searchSettings.allNews) {
-        // Selective OFF - only show "All" tab
-        tabsBar.style.display = 'flex';
-        
-        const allTab = document.createElement('div');
-        allTab.className = 'topic-tab all-tab active';
-        allTab.textContent = 'ALL';
-        allTab.onclick = () => filterByTopic('all');
-        tabsList.appendChild(allTab);
-    } else {
-        // Selective ON - show "All" + individual topic tabs
-        tabsBar.style.display = 'flex';
-        
-        // "All" tab
-        const allTab = document.createElement('div');
-        allTab.className = 'topic-tab all-tab' + (currentTopicFilter === 'all' ? ' active' : '');
-        allTab.textContent = 'ALL';
-        allTab.onclick = () => filterByTopic('all');
-        tabsList.appendChild(allTab);
-        
-        // Get unique topic names (deduplicate)
-        const uniqueTopicNames = [];
-        const seenNames = new Set();
-        
-        searchSettings.topics.forEach((topic, index) => {
-            let topicName;
-            if (typeof topic === 'string') {
-                topicName = `Topic ${index + 1}`;
-            } else {
-                // Handle undefined, null, or empty topic names
-                topicName = topic.topic_name && topic.topic_name.trim() 
-                    ? topic.topic_name.trim() 
-                    : `Topic ${index + 1}`;
-            }
-            
-            // Skip empty topic names and ensure uniqueness
-            if (topicName && topicName.trim() && !seenNames.has(topicName)) {
-                seenNames.add(topicName);
-                uniqueTopicNames.push(topicName);
-            }
-        });
-        
-        // Individual topic tabs (one per unique name)
-        uniqueTopicNames.forEach(topicName => {
-            if (topicName && topicName.trim()) {
-                const tab = document.createElement('div');
-                tab.className = 'topic-tab' + (currentTopicFilter === topicName ? ' active' : '');
-                tab.textContent = topicName.toUpperCase();
-                tab.onclick = () => filterByTopic(topicName);
-                tabsList.appendChild(tab);
-            }
-        });
+    tabsBar.style.display = 'flex';
+
+    const allTab = document.createElement('div');
+    allTab.className = 'topic-tab all-tab' + (currentTopicFilter === 'all' ? ' active' : '');
+    allTab.textContent = 'ALL';
+    allTab.onclick = () => filterByTopic('all');
+    tabsList.appendChild(allTab);
+
+    const mode = searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic');
+    if (mode === 'all') {
+        return;
     }
+
+    const uniqueTopicNames = [];
+    const seenNames = new Set();
+    const source = mode === 'negative'
+        ? (searchSettings.negativeCategories || [])
+        : (searchSettings.topics || []);
+
+    source.forEach((item, index) => {
+        let topicName;
+        if (mode === 'negative') {
+            topicName = item.category_name && item.category_name.trim()
+                ? item.category_name.trim()
+                : `Category ${index + 1}`;
+        } else if (typeof item === 'string') {
+            topicName = `Topic ${index + 1}`;
+        } else {
+            topicName = item.topic_name && item.topic_name.trim()
+                ? item.topic_name.trim()
+                : `Topic ${index + 1}`;
+        }
+        if (topicName && !seenNames.has(topicName)) {
+            seenNames.add(topicName);
+            uniqueTopicNames.push(topicName);
+        }
+    });
+
+    uniqueTopicNames.forEach(topicName => {
+        const tab = document.createElement('div');
+        tab.className = 'topic-tab' + (currentTopicFilter === topicName ? ' active' : '');
+        tab.textContent = topicName.toUpperCase();
+        tab.onclick = () => filterByTopic(topicName);
+        tabsList.appendChild(tab);
+    });
 }
 
 function filterByTopic(topicName) {

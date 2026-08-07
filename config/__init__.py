@@ -12,11 +12,18 @@ from .sector_topics import (
     list_sectors,
     safe_sector_topics_revision,
 )
-from .topics import DEFAULT_TOPICS, normalize_topic_category_slug, safe_default_topics_revision
+from .topics import (
+    DEFAULT_TOPICS,
+    NEGATIVE_NEWS_CATEGORIES,
+    normalize_topic_category_slug,
+    safe_default_topics_revision,
+    safe_negative_news_categories_revision,
+)
 
 __all__ = [
     "DEFAULT_TOPICS",
     "ENERGY_TOPICS",
+    "NEGATIVE_NEWS_CATEGORIES",
     "SECTORS",
     "UnknownSectorError",
     "default_topics_by_sector",
@@ -25,5 +32,6 @@ __all__ = [
     "list_sectors",
     "normalize_topic_category_slug",
     "safe_default_topics_revision",
+    "safe_negative_news_categories_revision",
     "safe_sector_topics_revision",
 ]

@@ -85,36 +85,17 @@
                     <span class="text-white text-base font-medium">News Terminal Demo</span>
                     <nav class="terminal-nav">
                         <a href="/" class="terminal-nav-link active">Companies</a>
-                        <a href="/sector" class="terminal-nav-link">Sectors</a>
+                        <a href="/sector" class="terminal-nav-link">Commodities</a>
+                        <a href="/how-it-works" class="terminal-nav-link">How it works</a>
                     </nav>
                 </div>
                 
-                <!-- Right: Powered By + How it works + App Grid Icon -->
+                <!-- Right: Powered By + App Grid Icon -->
                 <div class="flex items-center space-x-6">
                     <!-- Powered By Text -->
                     <span class="hidden lg:inline text-sm text-gray-400">
                         Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
                     </span>
-                    
-                    <!-- How it works dropdown -->
-                    <div class="relative flex items-center">
-                        <button 
-                            id="howItWorksBtn"
-                            class="text-accent-subtle hover:text-white transition-colors text-sm leading-none"
-                        >
-                            How it works
-                        </button>
-                        
-                        <!-- Dropdown Panel -->
-                        <div id="howItWorksPanel" class="dropdown-panel w-96 p-6">
-                            <h3 class="text-lg font-semibold text-white mb-4">How it works</h3>
-                            <div class="text-gray-400 text-sm space-y-3">
-                                <p class="min-h-[200px] border border-dashed border-gray-600 rounded p-4 flex items-center justify-center">
-                                    <span class="text-gray-500">Add your explanation here...</span>
-                                </p>
-                            </div>
-                        </div>
-                    </div>
                     
                     <!-- App Grid Icon -->
                     <div class="relative flex items-center">
@@ -160,6 +141,9 @@
                 <button id="topicModeBtn" class="filter-mode-btn active" onclick="setSearchMode('topic')">
                     <span class="mode-label">Topic News (<span id="topicsCountInline">—</span>)</span>
                 </button>
+                <button id="negativeModeBtn" class="filter-mode-btn" onclick="setSearchMode('negative')">
+                    <span class="mode-label">Negative News (<span id="negativeCountInline">—</span>)</span>
+                </button>
                 <button id="allModeBtn" class="filter-mode-btn" onclick="setSearchMode('all')">
                     <span class="mode-label">All News</span>
                 </button>
@@ -179,6 +163,24 @@
                 </div>
             </div>
             
+            <div class="filter-divider"></div>
+            
+            <!-- Relevance Threshold -->
+            <div class="filter-group">
+                <label class="relevance-filter-label" for="relevanceFilter">RELEVANCE</label>
+                <select id="relevanceFilter" class="relevance-filter-select" onchange="updateRelevanceFilter()">
+                    <option value="0">Any</option>
+                    <option value="0.1">10%+</option>
+                    <option value="0.2">20%+</option>
+                    <option value="0.3">30%+</option>
+                    <option value="0.4">40%+</option>
+                    <option value="0.5">50%+</option>
+                    <option value="0.6">60%+</option>
+                    <option value="0.7">70%+</option>
+                    <option value="0.8">80%+</option>
+                </select>
+            </div>
+            
             <div class="filter-divider advanced-options"></div>
             
             <!-- Advanced Options (only for Topic mode) -->
@@ -190,10 +192,10 @@
                 </label>
             </div>
             
-            <!-- Topics Editor (moved to right) -->
-            <div class="filter-group-right">
-                <button id="topicsDropdown" class="topics-edit-btn" onclick="toggleTopicsPanel()" title="Edit topics">
-                    <span class="topics-label">Edit Topics</span>
+            <!-- Topics / Categories Editor (moved to right) -->
+            <div class="filter-group-right" id="topicsDropdownWrapper">
+                <button id="topicsDropdown" class="topics-edit-btn" onclick="toggleEditPanel()" title="Edit topics or categories">
+                    <span class="topics-label" id="editPanelLabel">Edit Topics</span>
                 </button>
             </div>
         </div>
@@ -208,6 +210,19 @@
                 <button class="topics-add-button" onclick="addTopicInput()">+ ADD TOPIC</button>
                 <button class="topics-reset-button" onclick="resetTopicsToDefault()">RESET</button>
                 <button class="topics-save-button" onclick="saveAndCloseTopics()">SAVE & CLOSE</button>
+            </div>
+        </div>
+
+        <!-- Negative Categories Edit Panel -->
+        <div id="negativeCategoriesPanel" class="topics-panel">
+            <div class="topics-panel-header">
+                <span>EDIT NEGATIVE CATEGORIES (Bigdata taxonomy topic strings):</span>
+            </div>
+            <div id="negativeCategoriesInputList" class="topics-input-list"></div>
+            <div class="topics-panel-actions">
+                <button class="topics-add-button" onclick="addNegativeCategory()">+ ADD CATEGORY</button>
+                <button class="topics-reset-button" onclick="resetNegativeCategoriesToDefault()">RESET</button>
+                <button class="topics-save-button" onclick="saveAndCloseNegativeCategories()">SAVE & CLOSE</button>
             </div>
         </div>
         
@@ -318,40 +333,20 @@
     <script src="/static/app.js?v=3.4"></script>
     
     <script>
-        // Header dropdown functionality
+        // Header tooltip for app grid
         document.addEventListener('DOMContentLoaded', function() {
-            const howItWorksBtn = document.getElementById('howItWorksBtn');
-            const howItWorksPanel = document.getElementById('howItWorksPanel');
             const appGridIcon = document.getElementById('appGridIcon');
             const appGridTooltip = document.getElementById('appGridTooltip');
-            
-            // Toggle dropdown panel
-            howItWorksBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                howItWorksPanel.classList.toggle('show');
-            });
-            
-            // Close dropdown when clicking outside
-            document.addEventListener('click', function(e) {
-                if (!howItWorksPanel.contains(e.target) && e.target !== howItWorksBtn) {
-                    howItWorksPanel.classList.remove('show');
-                }
-            });
-            
-            // Prevent closing when clicking inside panel
-            howItWorksPanel.addEventListener('click', function(e) {
-                e.stopPropagation();
-            });
-            
-            // App grid tooltip
-            appGridIcon.addEventListener('mouseenter', function(e) {
+            if (!appGridIcon || !appGridTooltip) return;
+
+            appGridIcon.addEventListener('mouseenter', function() {
                 const rect = appGridIcon.getBoundingClientRect();
                 appGridTooltip.style.top = (rect.bottom + 5) + 'px';
                 appGridTooltip.style.left = (rect.left + rect.width / 2) + 'px';
                 appGridTooltip.style.transform = 'translateX(-50%)';
                 appGridTooltip.classList.add('show');
             });
-            
+
             appGridIcon.addEventListener('mouseleave', function() {
                 appGridTooltip.classList.remove('show');
             });

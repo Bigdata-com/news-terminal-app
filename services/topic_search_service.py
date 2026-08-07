@@ -61,7 +61,13 @@ from pydantic import BaseModel
 from .rate_limiter import RateLimiter
 from .company_cache import CompanyDataCache, CompanyData
 from .gemini_service import GeminiService
-from config.topics import DEFAULT_TOPICS
+from config.topics import (
+    DEFAULT_TOPICS,
+    NEGATIVE_NEWS_CATEGORIES,
+    NEGATIVE_NEWS_ENTITY_BATCH_SIZE,
+    NEGATIVE_NEWS_ENTITY_SEARCH_IN,
+    NEGATIVE_NEWS_SENTIMENT_RANGES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -794,6 +800,369 @@ Return exactly 3 variations, each as a complete search query."""
             for i, item in enumerate(deduplicated)
         ]
     
+    @staticmethod
+    def _chunk_list(items: List, size: int) -> List[List]:
+        """Split ``items`` into consecutive batches of at most ``size``."""
+        if size < 1:
+            size = 1
+        return [items[i:i + size] for i in range(0, len(items), size)]
+
+    def _resolve_ticker_from_detections(
+        self,
+        detections: List[Dict],
+        entity_to_ticker: Dict[str, str],
+        fallback_ticker: str,
+    ) -> str:
+        """Map chunk detections to a ticker in the current entity batch."""
+        for detection in detections or []:
+            entity = detection.get("entity") or {}
+            entity_id = entity.get("id") or detection.get("entity_id") or detection.get("id")
+            if entity_id and entity_id in entity_to_ticker:
+                return entity_to_ticker[entity_id]
+        return fallback_ticker
+
+    async def search_negative_category(
+        self,
+        entity_ids: List[str],
+        entity_to_ticker: Dict[str, str],
+        category: Dict,
+        category_index: int,
+        days: int = 7,
+        max_chunks: int = 20,
+    ) -> List[Dict]:
+        """
+        Search one negative-news category for a single entity batch.
+
+        Uses filters only (no query text): news_public category, headline entity match,
+        strongly negative sentiment range, and taxonomy topic any_of.
+        """
+        category_name = category.get("category_name", f"Category {category_index}")
+        taxonomy_topics = [
+            t.strip() for t in (category.get("topics") or []) if isinstance(t, str) and t.strip()
+        ]
+        if not taxonomy_topics or not entity_ids:
+            return []
+
+        if len(entity_ids) > NEGATIVE_NEWS_ENTITY_BATCH_SIZE:
+            entity_ids = entity_ids[:NEGATIVE_NEWS_ENTITY_BATCH_SIZE]
+
+        fallback_ticker = entity_to_ticker.get(entity_ids[0], entity_ids[0])
+        logger.debug(
+            f"Negative search category {category_index} ({category_name}) "
+            f"entities={entity_ids}"
+        )
+
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+
+        await self.rate_limiter.acquire()
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/search",
+                headers={
+                    "X-API-KEY": self.api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "search_mode": "fast",
+                    "query": {
+                        "filters": {
+                            "timestamp": {
+                                "start": self._format_timestamp(start_time),
+                                "end": self._format_timestamp(end_time),
+                            },
+                            "category": {
+                                "mode": "INCLUDE",
+                                "values": ["news_public"],
+                            },
+                            "entity": {
+                                "search_in": NEGATIVE_NEWS_ENTITY_SEARCH_IN,
+                                "any_of": entity_ids,
+                            },
+                            "sentiment": {
+                                "ranges": NEGATIVE_NEWS_SENTIMENT_RANGES,
+                            },
+                            "topic": {
+                                "search_in": "ALL",
+                                "any_of": taxonomy_topics,
+                            },
+                        },
+                        "max_chunks": max_chunks,
+                    },
+                },
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get("results", [])
+                    deduplicated = self._deduplicate_by_document_id(results)
+
+                    articles = []
+                    for i, item in enumerate(deduplicated):
+                        article = item["article"]
+                        best_chunk = item["best_chunk"]
+                        relevance = item["relevance"]
+
+                        chunk_text = best_chunk.get("text", "")
+                        summary = (
+                            chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text
+                        )
+                        timestamp = article.get("timestamp", "")
+                        detections = best_chunk.get("detections", [])
+                        ticker = self._resolve_ticker_from_detections(
+                            detections, entity_to_ticker, fallback_ticker
+                        )
+
+                        articles.append({
+                            "id": article.get("id", f"negative_{category_index}_{i}"),
+                            "headline": article.get("headline", "No headline"),
+                            "timestamp": timestamp,
+                            "time_ago": self._get_time_ago(timestamp),
+                            "source": article.get("source", {}).get("name", "Unknown"),
+                            "summary": summary,
+                            "full_text": chunk_text,
+                            "document_url": article.get("url"),
+                            "relevance": relevance,
+                            "document_type": article.get("document_type", "NEWS"),
+                            "search_type": "negative",
+                            "topic": category_name,
+                            "topic_name": category_name,
+                            "topic_index": category_index,
+                            "ticker": ticker,
+                            "detections": detections,
+                        })
+
+                    return articles
+
+                if response.status != 404:
+                    error_text = await response.text()
+                    logger.warning(
+                        f"Negative category search error ({category_name}): "
+                        f"{response.status} - {error_text}"
+                    )
+                return []
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout in negative category search: {category_name}")
+            return []
+        except Exception as e:
+            logger.warning(f"Error in negative category search ({category_name}): {e}")
+            return []
+
+    async def search_negative_news(
+        self,
+        ticker: str,
+        days: int = 7,
+        custom_categories: Optional[List[Dict]] = None,
+        min_relevance: float = 0.0,
+        batch_size: int = 50,
+    ) -> Dict:
+        """
+        Negative-news search for a single ticker (taxonomy topics + negative sentiment).
+        """
+        ticker = ticker.upper()
+        company_data = await self.get_company_data(ticker)
+        if not company_data:
+            return {
+                "ticker": ticker,
+                "error": "Company not found",
+                "topic_results": [],
+                "total_results": 0,
+            }
+
+        companies = [
+            {
+                "ticker": ticker,
+                "entity_id": company_data.entity_id,
+                "company_name": company_data.company_name,
+            }
+        ]
+        results = await self._search_negative_news_for_companies(
+            companies,
+            days=days,
+            custom_categories=custom_categories,
+            min_relevance=min_relevance,
+            batch_size=batch_size,
+        )
+        # Single-ticker response shape matches search_ticker()
+        if results:
+            return results[0]
+        return {
+            "ticker": ticker,
+            "company_name": company_data.company_name,
+            "entity_id": company_data.entity_id,
+            "topic_results": [],
+            "total_results": 0,
+        }
+
+    async def search_negative_news_multiple(
+        self,
+        tickers: List[str],
+        days: int = 7,
+        custom_categories: Optional[List[Dict]] = None,
+        min_relevance: float = 0.0,
+        batch_size: int = 50,
+    ) -> List[Dict]:
+        """
+        Negative-news search for multiple tickers, one entity per search request.
+        """
+        companies: List[Dict] = []
+        unresolved: List[Dict] = []
+
+        for raw in tickers:
+            ticker = raw.upper().strip()
+            if not ticker:
+                continue
+            company_data = await self.get_company_data(ticker)
+            if not company_data:
+                unresolved.append({
+                    "ticker": ticker,
+                    "error": "Company not found",
+                    "topic_results": [],
+                    "total_results": 0,
+                })
+                continue
+            companies.append({
+                "ticker": ticker,
+                "entity_id": company_data.entity_id,
+                "company_name": company_data.company_name,
+            })
+
+        results = await self._search_negative_news_for_companies(
+            companies,
+            days=days,
+            custom_categories=custom_categories,
+            min_relevance=min_relevance,
+            batch_size=batch_size,
+        )
+        return results + unresolved
+
+    async def _search_negative_news_for_companies(
+        self,
+        companies: List[Dict],
+        days: int = 7,
+        custom_categories: Optional[List[Dict]] = None,
+        min_relevance: float = 0.0,
+        batch_size: int = 50,
+    ) -> List[Dict]:
+        """
+        Core negative-news runner: entity batches × categories in parallel.
+        """
+        start_time = datetime.now()
+        categories = custom_categories or NEGATIVE_NEWS_CATEGORIES
+        # Normalize / drop empty categories
+        categories = [
+            {
+                "category_name": c.get("category_name", f"Category {i}"),
+                "topics": [
+                    t.strip()
+                    for t in (c.get("topics") or [])
+                    if isinstance(t, str) and t.strip()
+                ],
+            }
+            for i, c in enumerate(categories)
+            if c.get("topics")
+        ]
+        categories = [c for c in categories if c["topics"]]
+
+        if not companies or not categories:
+            return [
+                {
+                    "ticker": c["ticker"],
+                    "company_name": c.get("company_name"),
+                    "entity_id": c.get("entity_id"),
+                    "topic_results": [],
+                    "total_results": 0,
+                    "search_stats": {
+                        "categories_searched": 0,
+                        "elapsed_seconds": 0,
+                        "rate_limiter_stats": self.rate_limiter.get_metrics(),
+                    },
+                }
+                for c in companies
+            ]
+
+        entity_batches = self._chunk_list(companies, NEGATIVE_NEWS_ENTITY_BATCH_SIZE)
+        total_queries = len(entity_batches) * len(categories)
+        total_chunk_budget = 300
+        chunks_per_query = max(1, total_chunk_budget // total_queries)
+
+        logger.info(
+            f"Starting NEGATIVE news search for "
+            f"{[c['ticker'] for c in companies]}: "
+            f"{len(categories)} categories × {len(entity_batches)} entity batches "
+            f"({chunks_per_query} chunks/query)"
+        )
+
+        tasks = []
+        for batch in entity_batches:
+            entity_ids = [c["entity_id"] for c in batch]
+            entity_to_ticker = {c["entity_id"]: c["ticker"] for c in batch}
+            for cat_idx, category in enumerate(categories):
+                tasks.append(
+                    self.search_negative_category(
+                        entity_ids=entity_ids,
+                        entity_to_ticker=entity_to_ticker,
+                        category=category,
+                        category_index=cat_idx,
+                        days=days,
+                        max_chunks=chunks_per_query,
+                    )
+                )
+
+        all_articles: List[Dict] = []
+        for i in range(0, len(tasks), batch_size):
+            batch_tasks = tasks[i:i + batch_size]
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            for result in batch_results:
+                if isinstance(result, list):
+                    all_articles.extend(result)
+                elif isinstance(result, Exception):
+                    logger.error(f"Negative category search failed: {result}")
+
+        all_articles = self._deduplicate_across_topics(all_articles)
+        if min_relevance > 0:
+            all_articles = [
+                r for r in all_articles if r.get("relevance", 0) >= min_relevance
+            ]
+
+        # Split results back per ticker
+        by_ticker: Dict[str, List[Dict]] = {c["ticker"]: [] for c in companies}
+        for article in all_articles:
+            t = article.get("ticker")
+            if t in by_ticker:
+                by_ticker[t].append(article)
+            elif companies:
+                # Fallback if attribution missed
+                by_ticker[companies[0]["ticker"]].append(article)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        results = []
+        for c in companies:
+            ticker_articles = by_ticker.get(c["ticker"], [])
+            results.append({
+                "ticker": c["ticker"],
+                "company_name": c["company_name"],
+                "entity_id": c["entity_id"],
+                "topic_results": ticker_articles,
+                "total_results": len(ticker_articles),
+                "search_stats": {
+                    "categories_searched": len(categories),
+                    "entity_batches": len(entity_batches),
+                    "total_queries": total_queries,
+                    "elapsed_seconds": round(elapsed, 2),
+                    "rate_limiter_stats": self.rate_limiter.get_metrics(),
+                },
+            })
+            logger.info(
+                f"Completed negative search for {c['ticker']}: "
+                f"{len(ticker_articles)} results in {elapsed:.2f}s"
+            )
+
+        return results
+
     async def search_ticker(
         self,
         ticker: str,

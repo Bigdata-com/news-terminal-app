@@ -382,3 +382,84 @@ def list_available_configs() -> dict:
         "baseline_only": "Entity search only (no topic searches, no sentiment filter)",
     }
 
+
+# Web UI uses this to replace stale negative categories in localStorage.
+# Increment when adding/removing/editing NEGATIVE_NEWS_CATEGORIES entries.
+NEGATIVE_NEWS_CATEGORIES_REVISION: int = 1
+
+# Max entity IDs per negative-news Bigdata search request.
+# One entity per call keeps ticker attribution unambiguous for multi-ticker searches.
+NEGATIVE_NEWS_ENTITY_BATCH_SIZE: int = 1
+
+# Match the company in the headline so passing body mentions are excluded.
+NEGATIVE_NEWS_ENTITY_SEARCH_IN: str = "HEADLINE"
+
+# Only strongly negative sentiment qualifies as negative news.
+NEGATIVE_NEWS_SENTIMENT_RANGES: list[dict[str, float]] = [{"min": -1, "max": -0.3}]
+
+
+def safe_negative_news_categories_revision() -> int:
+    """Return ``NEGATIVE_NEWS_CATEGORIES_REVISION`` as an int >= 1 for API consumers."""
+    try:
+        r = int(NEGATIVE_NEWS_CATEGORIES_REVISION)
+    except (TypeError, ValueError):
+        return 1
+    return r if r >= 1 else 1
+
+
+# Negative news taxonomy categories (Bigdata topic filter strings).
+# Grouped by risk theme; editable in the web UI.
+NEGATIVE_NEWS_CATEGORIES: list[dict[str, object]] = [
+    {
+        "category_name": "Litigation / Misconduct",
+        "topics": [
+            "society,legal,legal-issues,,",
+            "society,legal,illicit-activity,exposed,",
+            "society,legal,fraud,,",
+            "society,legal,corruption,,",
+            "society,legal,money-laundering,,",
+            "society,legal,embezzlement,,",
+            "society,legal,antitrust-investigation,,",
+        ],
+    },
+    {
+        "category_name": "Regulatory",
+        "topics": [
+            "business,regulatory,regulatory-investigation,,",
+            "business,regulatory,facility-inspection,,",
+            "business,regulatory,environmental-noncompliance,,",
+            "business,regulatory,exchange-noncompliance,,",
+            "business,regulatory,labor-conditions-noncompliance,,",
+            "business,earnings,earnings,probe,",
+        ],
+    },
+    {
+        "category_name": "Credit stress",
+        "topics": [
+            "business,bankruptcy,bankruptcy,fears,",
+            "business,bankruptcy,technical-default,fears,",
+            "business,credit-default-swap,credit-event,fears,",
+            "business,credit,breach-of-covenants,fears,",
+            "business,credit,coupon-payment-failed,fears,",
+            "business,credit-ratings,credit-rating-watch,negative,",
+            "business,credit-ratings,credit-rating-outlook,negative,",
+        ],
+    },
+    {
+        "category_name": "Governance / leadership",
+        "topics": [
+            "business,labor-issues,executive-resignation,,",
+            "business,regulatory,auditor-resignation,,",
+            "business,labor-issues,board-member-resignation,,",
+        ],
+    },
+    {
+        "category_name": "Operational / cyber",
+        "topics": [
+            "society,cyber-security,data-breach,,",
+            "society,cyber-security,ransomware-attack,,",
+            "business,products-services,product-recall,,",
+        ],
+    },
+]
+

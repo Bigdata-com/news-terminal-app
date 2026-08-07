@@ -86,43 +86,16 @@
                     <nav class="terminal-nav">
                         <a href="/" class="terminal-nav-link">Companies</a>
                         <a href="/sector" class="terminal-nav-link active">Commodities</a>
+                        <a href="/how-it-works" class="terminal-nav-link">How it works</a>
                     </nav>
                 </div>
 
-                <!-- Right: Powered By + How it works + App Grid Icon -->
+                <!-- Right: Powered By + App Grid Icon -->
                 <div class="flex items-center space-x-6">
                     <!-- Powered By Text -->
                     <span class="hidden lg:inline text-sm text-gray-400">
                         Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
                     </span>
-
-                    <!-- How it works dropdown -->
-                    <div class="relative flex items-center">
-                        <button
-                            id="howItWorksBtn"
-                            class="text-accent-subtle hover:text-white transition-colors text-sm leading-none"
-                        >
-                            How it works
-                        </button>
-
-                        <!-- Dropdown Panel -->
-                        <div id="howItWorksPanel" class="dropdown-panel w-96 p-6">
-                            <h3 class="text-lg font-semibold text-white mb-4">How it works</h3>
-                            <div class="text-gray-400 text-sm space-y-3">
-                                <p>Pick a sector to load a live news feed built entirely from the Search API.</p>
-                                <p>
-                                    Each sector ships with a set of desk-level search phrases. Every phrase runs as its
-                                    own semantic query with no company filter, so the feed follows the theme rather than
-                                    a single issuer.
-                                </p>
-                                <p>
-                                    Results are de-duplicated across phrases, ranked by relevance, and grouped into the
-                                    topic tabs below. Use <strong class="text-gray-200">Edit Topics</strong> to change
-                                    the phrases to match how your desk actually scans the market.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- App Grid Icon -->
                     <div class="relative flex items-center">
@@ -266,33 +239,13 @@
     <script src="/static/sector.js?v=1.0"></script>
 
     <script>
-        // Header dropdown functionality
+        // Header tooltip for app grid
         document.addEventListener('DOMContentLoaded', function() {
-            const howItWorksBtn = document.getElementById('howItWorksBtn');
-            const howItWorksPanel = document.getElementById('howItWorksPanel');
             const appGridIcon = document.getElementById('appGridIcon');
             const appGridTooltip = document.getElementById('appGridTooltip');
+            if (!appGridIcon || !appGridTooltip) return;
 
-            // Toggle dropdown panel
-            howItWorksBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                howItWorksPanel.classList.toggle('show');
-            });
-
-            // Close dropdown when clicking outside
-            document.addEventListener('click', function(e) {
-                if (!howItWorksPanel.contains(e.target) && e.target !== howItWorksBtn) {
-                    howItWorksPanel.classList.remove('show');
-                }
-            });
-
-            // Prevent closing when clicking inside panel
-            howItWorksPanel.addEventListener('click', function(e) {
-                e.stopPropagation();
-            });
-
-            // App grid tooltip
-            appGridIcon.addEventListener('mouseenter', function(e) {
+            appGridIcon.addEventListener('mouseenter', function() {
                 const rect = appGridIcon.getBoundingClientRect();
                 appGridTooltip.style.top = (rect.bottom + 5) + 'px';
                 appGridTooltip.style.left = (rect.left + rect.width / 2) + 'px';

@@ -22,11 +22,17 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=1.4.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "e2e: live Bigdata.com API tests (needs BIGDATA_API_KEY)",
+]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How it works — News Terminal</title>
+    <link rel="icon" type="image/png" href="https://app.bigdata.com/icons/logo-squared-production-512x512.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-primary': '#151515',
+                        'accent-subtle': '#8d99ae',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .how-page {
+            max-width: 920px;
+            margin: 0 auto;
+            padding: 32px 20px 80px;
+        }
+        .how-page h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #f0f6fc;
+            margin-bottom: 8px;
+        }
+        .how-page .lede {
+            color: #8b949e;
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 36px;
+        }
+        .how-section {
+            margin-bottom: 40px;
+            padding-bottom: 32px;
+            border-bottom: 1px solid #30363d;
+        }
+        .how-section:last-of-type {
+            border-bottom: none;
+        }
+        .how-section h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #58a6ff;
+            margin-bottom: 6px;
+        }
+        .how-meta {
+            font-size: 12px;
+            color: #6e7681;
+            margin-bottom: 14px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .how-section p {
+            color: #c9d1d9;
+            font-size: 14px;
+            line-height: 1.65;
+            margin-bottom: 12px;
+        }
+        .how-section ul {
+            color: #c9d1d9;
+            font-size: 14px;
+            line-height: 1.65;
+            margin: 0 0 16px 18px;
+            list-style: disc;
+        }
+        .how-section code.inline {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 12px;
+            color: #79c0ff;
+        }
+        .payload-block {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 14px 16px;
+            overflow-x: auto;
+            margin: 12px 0 8px;
+        }
+        .payload-block pre {
+            margin: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #c9d1d9;
+            white-space: pre;
+        }
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+        .compare-table th,
+        .compare-table td {
+            border: 1px solid #30363d;
+            padding: 10px 12px;
+            text-align: left;
+            vertical-align: top;
+            color: #c9d1d9;
+        }
+        .compare-table th {
+            background: #161b22;
+            color: #8b949e;
+            font-weight: 600;
+            font-size: 11px;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+        }
+        .compare-table td:first-child {
+            color: #8b949e;
+            white-space: nowrap;
+            width: 140px;
+        }
+        .toc {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 28px;
+        }
+        .toc a {
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #8b949e;
+            text-decoration: none;
+        }
+        .toc a:hover {
+            border-color: #58a6ff;
+            color: #58a6ff;
+        }
+    </style>
+</head>
+<body class="bg-bg-primary text-gray-100 font-sans">
+    <header class="sticky top-0 z-50 bg-black/70 backdrop-blur-sm border-b border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <a href="https://platform.bigdata.com/" class="flex items-center">
+                        <img
+                            src="https://cdn.sanity.io/images/5zq5cwwy/production/31c4eb42fc009ee6678a5ec6e381530b99d740c4-166x36.svg"
+                            alt="BigData Logo"
+                            class="h-8"
+                            onerror="this.outerHTML='<span class=\'text-white font-bold\'>BigData</span>'"
+                        >
+                    </a>
+                    <span class="text-white text-base font-medium">News Terminal Demo</span>
+                    <nav class="terminal-nav">
+                        <a href="/" class="terminal-nav-link">Companies</a>
+                        <a href="/sector" class="terminal-nav-link">Commodities</a>
+                        <a href="/how-it-works" class="terminal-nav-link active">How it works</a>
+                    </nav>
+                </div>
+                <span class="hidden lg:inline text-sm text-gray-400">
+                    Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main class="how-page">
+        <h1>How it works</h1>
+        <p class="lede">
+            Three search modes share the same Bigdata.com <code class="inline">POST /v1/search</code> endpoint
+            but ask for very different things. This page shows the plain-English flow and the exact payload shape
+            for each mode.
+        </p>
+
+        <nav class="toc" aria-label="On this page">
+            <a href="#topic-news">Company Topic News</a>
+            <a href="#negative-news">Company Negative News</a>
+            <a href="#sector-news">Sector / Commodity News</a>
+            <a href="#compare">Quick compare</a>
+        </nav>
+
+        <section class="how-section" id="topic-news">
+            <h2>1. Company Topic News</h2>
+            <p class="how-meta">UI: / · Topic News · API: POST /api/news/{ticker}</p>
+            <p>
+                Pick a ticker (or several). The app resolves it to a Bigdata entity ID, then runs
+                <strong>one natural-language query per editable topic</strong>. Each topic template contains
+                <code class="inline">{company}</code>, which is replaced with the company name before search.
+            </p>
+            <ul>
+                <li>Scoped to that company via an entity filter</li>
+                <li>Keeps positive and negative sentiment (drops neutral)</li>
+                <li>Sources: news and transcripts</li>
+                <li>Optional AI query expansion multiplies each topic into more phrases</li>
+                <li>UI relevance dropdown drops weak hits after results return</li>
+            </ul>
+            <p>Search payload (one call per topic):</p>
+            <div class="payload-block"><pre>{
+  "query": {
+    "text": "Apple Inc. reported earnings results beating or missing revenue and profit expectations",
+    "filters": {
+      "timestamp": { "start": "...", "end": "..." },
+      "entity": { "all_of": ["&lt;entity_id&gt;"] },
+      "document_type": {
+        "mode": "INCLUDE",
+        "values": ["NEWS", "TRANSCRIPT"]
+      },
+      "sentiment": {
+        "values": ["positive", "negative"]
+      }
+    },
+    "max_chunks": 10
+  }
+}</pre></div>
+        </section>
+
+        <section class="how-section" id="negative-news">
+            <h2>2. Company Negative News</h2>
+            <p class="how-meta">UI: / · Negative News · API: POST /api/news/{ticker} with negative_news: true</p>
+            <p>
+                Same company desk, different question: show <strong>strongly negative public news</strong> where the
+                company appears in the <strong>headline</strong>, grouped by risk categories (litigation, regulatory,
+                credit stress, governance, cyber / product).
+            </p>
+            <ul>
+                <li>Filter-only search — <strong>no query text</strong></li>
+                <li><code class="inline">search_mode: "fast"</code></li>
+                <li>Public news category only (<code class="inline">news_public</code>)</li>
+                <li>Entity matched in the headline (avoids drive-by body mentions)</li>
+                <li>Sentiment score in range <code class="inline">[-1, -0.3]</code></li>
+                <li>Bigdata taxonomy topics in <code class="inline">topic.any_of</code> (editable per category)</li>
+                <li>One entity ID per request (clean ticker attribution on multi-ticker runs)</li>
+            </ul>
+            <p>Search payload (one call per category × company):</p>
+            <div class="payload-block"><pre>{
+  "search_mode": "fast",
+  "query": {
+    "filters": {
+      "timestamp": { "start": "...", "end": "..." },
+      "category": {
+        "mode": "INCLUDE",
+        "values": ["news_public"]
+      },
+      "entity": {
+        "search_in": "HEADLINE",
+        "any_of": ["&lt;entity_id&gt;"]
+      },
+      "sentiment": {
+        "ranges": [{ "min": -1, "max": -0.3 }]
+      },
+      "topic": {
+        "search_in": "ALL",
+        "any_of": [
+          "society,legal,fraud,,",
+          "business,regulatory,regulatory-investigation,,"
+        ]
+      }
+    },
+    "max_chunks": 10
+  }
+}</pre></div>
+        </section>
+
+        <section class="how-section" id="sector-news">
+            <h2>3. Sector / Commodity News</h2>
+            <p class="how-meta">UI: /sector · API: POST /api/sector-news</p>
+            <p>
+                Commodities desk: pick Energy, Power, Shipping &amp; Freight, or Metals. Each desk ships with editable
+                theme phrases. Every phrase is searched <strong>verbatim</strong> — there is
+                <strong>no company / entity filter</strong>, so the feed follows the theme, not a single issuer.
+            </p>
+            <ul>
+                <li>Natural-language <code class="inline">query.text</code> (desk phrase as written)</li>
+                <li>No entity filter, no taxonomy topic filter</li>
+                <li>Positive + negative sentiment (neutral excluded)</li>
+                <li>Sources: news and transcripts</li>
+                <li>Optional AI expansion uses a desk-specific prompt</li>
+            </ul>
+            <p>Search payload (one call per theme phrase):</p>
+            <div class="payload-block"><pre>{
+  "query": {
+    "text": "Brent and WTI crude oil prices rise or fall on shifting supply and demand outlook",
+    "filters": {
+      "timestamp": { "start": "...", "end": "..." },
+      "document_type": {
+        "mode": "INCLUDE",
+        "values": ["NEWS", "TRANSCRIPT"]
+      },
+      "sentiment": {
+        "values": ["positive", "negative"]
+      }
+    },
+    "max_chunks": 20
+  }
+}</pre></div>
+        </section>
+
+        <section class="how-section" id="compare">
+            <h2>Quick compare</h2>
+            <table class="compare-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Topic News</th>
+                        <th>Negative News</th>
+                        <th>Sector / Commodity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Page</td>
+                        <td><code class="inline">/</code></td>
+                        <td><code class="inline">/</code></td>
+                        <td><code class="inline">/sector</code></td>
+                    </tr>
+                    <tr>
+                        <td>API</td>
+                        <td><code class="inline">POST /api/news/{ticker}</code></td>
+                        <td><code class="inline">POST /api/news/{ticker}</code><br>negative_news: true</td>
+                        <td><code class="inline">POST /api/sector-news</code></td>
+                    </tr>
+                    <tr>
+                        <td>Query text</td>
+                        <td>Yes — topic with company name</td>
+                        <td>No — filters only</td>
+                        <td>Yes — theme phrase verbatim</td>
+                    </tr>
+                    <tr>
+                        <td>Entity</td>
+                        <td><code class="inline">all_of</code> company</td>
+                        <td>Headline <code class="inline">any_of</code> (1 ID)</td>
+                        <td>None</td>
+                    </tr>
+                    <tr>
+                        <td>Taxonomy topics</td>
+                        <td>No</td>
+                        <td>Yes — risk categories</td>
+                        <td>No</td>
+                    </tr>
+                    <tr>
+                        <td>Sentiment</td>
+                        <td>positive + negative</td>
+                        <td>range −1 … −0.3</td>
+                        <td>positive + negative</td>
+                    </tr>
+                    <tr>
+                        <td>Sources</td>
+                        <td>NEWS, TRANSCRIPT</td>
+                        <td>category news_public</td>
+                        <td>NEWS, TRANSCRIPT</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+</body>
+</html>

@@ -15,8 +15,9 @@ Two terminals share the same backend and styling:
 
 | Page | Scope | Search |
 |------|-------|--------|
-| `/` | Company desk — one or more tickers | Entity-filtered, `{company}` substituted into each topic |
-| `/sector` | Sector desk — one theme, no ticker | Theme-only, no entity filter, phrases sent verbatim |
+| `/` | Company desk — Topic News or Negative News | Entity-filtered topics, or filter-only negative taxonomy search |
+| `/sector` | Commodities desk — one theme, no ticker | Theme-only, no entity filter, phrases sent verbatim |
+| `/how-it-works` | Docs | Plain-English flows + exact Bigdata search payloads for all three modes |
 
 The commodities page ships with four desks, each carrying 15 editable phrases and its own AI
 query-expansion prompt:
@@ -66,6 +67,7 @@ news_terminal/
 ├── static/                 # Web UI assets
 │   ├── index.html          # Company terminal (/)
 │   ├── sector.html         # Sector terminal (/sector)
+│   ├── how-it-works.html   # Docs page (/how-it-works)
 │   ├── style.css           # Shared styles for both terminals
 │   ├── app.js              # Company terminal logic
 │   └── sector.js           # Sector terminal logic
@@ -209,13 +211,14 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 ## API Endpoints
 
 - `GET /` - Company terminal interface
-- `GET /sector` - Sector terminal interface
-- `POST /api/news/{ticker}` - Get news for a single ticker (JSON body)
+- `GET /sector` - Commodities / sector terminal interface
+- `GET /how-it-works` - Standalone docs: Topic News, Negative News, and Sector search payloads
+- `POST /api/news/{ticker}` - Get news for a single ticker (JSON body; Topic, Negative, or All News)
 - `POST /api/news-multi` - Get news for multiple tickers (JSON body)
 - `GET /api/sectors` - Sector tiles, per-sector default topics, ``sector_topics_revision``, and expansion availability
 - `POST /api/sector-news` - Get theme news for a sector (JSON body, no ticker involved)
 - `GET /api/health` - Health check
-- `GET /api/config` - Default topics, ``default_topics_revision``, and commentary availability
+- `GET /api/config` - Default topics, negative categories, revisions, and commentary availability
 - `GET /api/cache/stats` - Cache statistics
 - `POST /api/cache/clear` - Clear cache
 
@@ -225,6 +228,7 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 {
   "days": 7,
   "basic_search": false,
+  "negative_news": false,
   "relevance": 0.1,
   "query_reformulation": false,
   "since_minutes": null,
@@ -233,11 +237,12 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
       "topic_name": "Financial Metrics",
       "topic_text": "{company} reported earnings results beating or missing revenue and profit expectations"
     }
-  ]
+  ],
+  "negative_categories": null
 }
 ```
 
-Omit ``topics`` to use the server default list from ``config/topics.py`` (currently ~29 topic rows). For multi-ticker requests, add `"tickers": ["AAPL", "TSLA", "NVDA"]` to the body.
+Set ``negative_news: true`` for taxonomy negative-news search (omit or leave ``topics`` unused; pass ``negative_categories`` to override defaults). Omit ``topics`` on Topic News to use the server default list from ``config/topics.py``. For multi-ticker requests, add `"tickers": ["AAPL", "TSLA", "NVDA"]` to the body.
 
 ### Sector News Request Body
 
