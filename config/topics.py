@@ -383,6 +383,9 @@ def list_available_configs() -> dict:
     }
 
 
+# Source categories included in every search (company topic, negative, and sector).
+SEARCH_SOURCE_CATEGORIES: list[str] = ["news_public", "transcripts"]
+
 # Web UI uses this to replace stale negative categories in localStorage.
 # Increment when adding/removing/editing NEGATIVE_NEWS_CATEGORIES entries.
 NEGATIVE_NEWS_CATEGORIES_REVISION: int = 1

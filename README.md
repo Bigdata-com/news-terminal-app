@@ -213,7 +213,7 @@ Run ``python scripts/cli_topic_search.py --help`` (and similar) for CLI options.
 - `GET /` - Company terminal interface
 - `GET /sector` - Commodities / sector terminal interface
 - `GET /how-it-works` - Standalone docs: Topic News, Negative News, and Sector search payloads
-- `POST /api/news/{ticker}` - Get news for a single ticker (JSON body; Topic, Negative, or All News)
+- `POST /api/news/{ticker}` - Get news for a single ticker (JSON body; Topic or Negative News)
 - `POST /api/news-multi` - Get news for multiple tickers (JSON body)
 - `GET /api/sectors` - Sector tiles, per-sector default topics, ``sector_topics_revision``, and expansion availability
 - `POST /api/sector-news` - Get theme news for a sector (JSON body, no ticker involved)

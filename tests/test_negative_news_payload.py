@@ -67,7 +67,7 @@ async def test_search_negative_category_payload_shape() -> None:
     query = body["query"]
     assert "text" not in query
     filters = query["filters"]
-    assert filters["category"] == {"mode": "INCLUDE", "values": ["news_public"]}
+    assert filters["category"] == {"mode": "INCLUDE", "values": ["news_public", "transcripts"]}
     assert "document_type" not in filters
     assert filters["sentiment"] == {"ranges": [{"min": -1, "max": -0.3}]}
     assert "values" not in filters["sentiment"]

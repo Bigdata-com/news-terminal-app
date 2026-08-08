@@ -67,6 +67,7 @@ from config.topics import (
     NEGATIVE_NEWS_ENTITY_BATCH_SIZE,
     NEGATIVE_NEWS_ENTITY_SEARCH_IN,
     NEGATIVE_NEWS_SENTIMENT_RANGES,
+    SEARCH_SOURCE_CATEGORIES,
 )
 
 logger = logging.getLogger(__name__)
@@ -417,7 +418,7 @@ Return exactly 3 variations, each as a complete search query."""
         days: float,
         entity_id: Optional[str] = None,
         sentiment: bool = False,
-        document_types: Optional[List[str]] = None,
+        source_categories: Optional[List[str]] = None,
     ) -> Dict:
         """
         Build the ``query.filters`` block for a /search request.
@@ -429,7 +430,7 @@ Return exactly 3 variations, each as a complete search query."""
             days: Lookback window in days (fractional values allowed)
             entity_id: Bigdata entity ID to scope the search to, or None for theme search
             sentiment: If True, exclude neutral chunks (positive/negative only)
-            document_types: Document types to include (defaults to NEWS + TRANSCRIPT)
+            source_categories: Source categories to include (defaults to public news + transcripts)
 
         Returns:
             Filters dictionary ready to embed in the request body
@@ -442,9 +443,9 @@ Return exactly 3 variations, each as a complete search query."""
                 "start": self._format_timestamp(start_time),
                 "end": self._format_timestamp(end_time)
             },
-            "document_type": {
+            "category": {
                 "mode": "INCLUDE",
-                "values": document_types or ["NEWS", "TRANSCRIPT"]
+                "values": source_categories or SEARCH_SOURCE_CATEGORIES
             }
         }
 
@@ -875,7 +876,7 @@ Return exactly 3 variations, each as a complete search query."""
                             },
                             "category": {
                                 "mode": "INCLUDE",
-                                "values": ["news_public"],
+                                "values": SEARCH_SOURCE_CATEGORIES,
                             },
                             "entity": {
                                 "search_in": NEGATIVE_NEWS_ENTITY_SEARCH_IN,

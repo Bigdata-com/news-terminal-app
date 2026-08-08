@@ -20,8 +20,8 @@ let defaultNegativeCategoriesRevisionFromServer = null;
 
 // Settings object (default: 7 days, Topics ON, Reformulation OFF)
 let searchSettings = {
-    searchMode: 'topic', // 'topic' | 'negative' | 'all'
-    allNews: false, // If true, use basic search (no topics) - derived from searchMode
+    searchMode: 'topic', // 'topic' | 'negative'
+    allNews: false, // Legacy; always false (All News UI removed)
     topics: [],
     negativeCategories: [],
     days: 7, // Default 7 days (1 week)
@@ -138,7 +138,7 @@ async function getNews(isRefresh = false) {
         
         // Build request body
         const requestBody = {
-            basic_search: searchSettings.searchMode === 'all',
+            basic_search: false,
             negative_news: searchSettings.searchMode === 'negative',
             relevance: getRelevanceSetting(),
             days: searchSettings.days,
@@ -866,7 +866,7 @@ async function generateCommentary() {
     try {
         // STEP 1: Fetch FULL news data (not incremental) for commentary
         const requestBody = {
-            basic_search: searchSettings.searchMode === 'all',
+            basic_search: false,
             negative_news: searchSettings.searchMode === 'negative',
             relevance: getRelevanceSetting(),
             days: searchSettings.days,
@@ -1219,6 +1219,7 @@ function buildDefaultSearchSettings() {
     const s = {
         searchMode: 'topic',
         allNews: false,
+        companyModesUiRevision: 1,
         topics: [...DEFAULT_TOPICS],
         negativeCategories: [...DEFAULT_NEGATIVE_CATEGORIES],
         days: 7,
@@ -1380,11 +1381,20 @@ function loadSettings() {
             // Replace localStorage topics when server default set changed (topics.py revision bump)
             syncStoredTopicsToServerRevision();
 
-            // Migrate / ensure searchMode
-            if (!searchSettings.searchMode) {
-                searchSettings.searchMode = searchSettings.allNews ? 'all' : 'topic';
+            // Migrate / ensure searchMode (Topic News is the default; All News UI removed)
+            if (!searchSettings.searchMode || searchSettings.searchMode === 'all') {
+                searchSettings.searchMode = 'topic';
             }
-            searchSettings.allNews = searchSettings.searchMode === 'all';
+            if (searchSettings.searchMode !== 'topic' && searchSettings.searchMode !== 'negative') {
+                searchSettings.searchMode = 'topic';
+            }
+            // One-time after All News removal: open on Topic News by default
+            if (searchSettings.companyModesUiRevision !== 1) {
+                searchSettings.searchMode = 'topic';
+                searchSettings.companyModesUiRevision = 1;
+                saveSettingsToStorage();
+            }
+            searchSettings.allNews = false;
 
             // Ensure negative categories exist
             if (!searchSettings.negativeCategories || searchSettings.negativeCategories.length === 0) {
@@ -1464,8 +1474,11 @@ function parseUrlParameters() {
 // ============================================================================
 
 function initializeFilters() {
-    // Restore mode UI from settings
-    applySearchModeUI(searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic'));
+    // Restore mode UI from settings (default Topic News)
+    const mode = (searchSettings.searchMode === 'negative') ? 'negative' : 'topic';
+    searchSettings.searchMode = mode;
+    searchSettings.allNews = false;
+    applySearchModeUI(mode);
     
     // Set date filter buttons
     document.querySelectorAll('.date-btn').forEach(btn => {
@@ -1547,7 +1560,6 @@ function updateRelevanceFilter() {
 function applySearchModeUI(mode) {
     const topicBtn = document.getElementById('topicModeBtn');
     const negativeBtn = document.getElementById('negativeModeBtn');
-    const allBtn = document.getElementById('allModeBtn');
     const advancedGroup = document.querySelector('.filter-group.advanced-options');
     const advancedDivider = document.querySelector('.filter-divider.advanced-options');
     const editWrapper = document.getElementById('topicsDropdownWrapper');
@@ -1556,55 +1568,45 @@ function applySearchModeUI(mode) {
 
     topicBtn.classList.toggle('active', mode === 'topic');
     if (negativeBtn) negativeBtn.classList.toggle('active', mode === 'negative');
-    allBtn.classList.toggle('active', mode === 'all');
+
+    // Keep AI-expansion controls in the layout (visibility only) so the bar does not jump.
+    if (advancedGroup) {
+        advancedGroup.classList.toggle('is-reserved-hidden', mode !== 'topic');
+        advancedGroup.style.display = 'flex';
+    }
+    if (advancedDivider) {
+        advancedDivider.classList.toggle('is-reserved-hidden', mode !== 'topic');
+        advancedDivider.style.display = 'block';
+    }
+    if (editWrapper) editWrapper.style.display = 'flex';
 
     if (mode === 'topic') {
-        if (advancedGroup) advancedGroup.style.display = 'flex';
-        if (advancedDivider) advancedDivider.style.display = 'block';
-        if (editWrapper) editWrapper.style.display = 'flex';
         if (editLabel) editLabel.textContent = 'Edit Topics';
         if (tabsLabel) tabsLabel.textContent = 'TOPICS:';
-    } else if (mode === 'negative') {
-        if (advancedGroup) advancedGroup.style.display = 'none';
-        if (advancedDivider) advancedDivider.style.display = 'none';
-        if (editWrapper) editWrapper.style.display = 'flex';
+    } else {
         if (editLabel) editLabel.textContent = 'Edit Categories';
         if (tabsLabel) tabsLabel.textContent = 'CATEGORIES:';
-    } else {
-        if (advancedGroup) advancedGroup.style.display = 'none';
-        if (advancedDivider) advancedDivider.style.display = 'none';
-        if (editWrapper) editWrapper.style.display = 'none';
-        closeTopicsPanel();
-        closeNegativeCategoriesPanel();
-        if (tabsLabel) tabsLabel.textContent = 'TOPICS:';
     }
 }
 
 function setSearchMode(mode) {
-    searchSettings.searchMode = mode;
-    searchSettings.allNews = mode === 'all';
-    applySearchModeUI(mode);
+    const nextMode = mode === 'negative' ? 'negative' : 'topic';
+    searchSettings.searchMode = nextMode;
+    searchSettings.allNews = false;
+    applySearchModeUI(nextMode);
     closeTopicsPanel();
     closeNegativeCategoriesPanel();
     renderTopicTabs();
     saveSettingsToStorage();
-    console.log('Search mode:', mode);
+    console.log('Search mode:', nextMode);
 }
 
 function toggleSelective() {
-    const selectiveToggle = document.getElementById('selectiveToggle');
-    searchSettings.allNews = !selectiveToggle.checked;
-    
-    // Update visibility of topics dropdown
+    // Legacy no-op: All News / selective toggle removed from UI
+    searchSettings.allNews = false;
     updateTopicsDropdownVisibility();
-    
-    // Render topic tabs
     renderTopicTabs();
-    
-    // Save to localStorage
     saveSettingsToStorage();
-    
-    console.log('Selective toggle:', selectiveToggle.checked ? 'ON' : 'OFF', '(allNews:', searchSettings.allNews + ')');
 }
 
 function toggleReformulate() {
@@ -1623,15 +1625,7 @@ function toggleReformulate() {
 
 function updateTopicsDropdownVisibility() {
     const topicsWrapper = document.getElementById('topicsDropdownWrapper');
-    const mode = searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic');
-    
-    if (mode === 'all') {
-        if (topicsWrapper) topicsWrapper.style.display = 'none';
-        closeTopicsPanel();
-        closeNegativeCategoriesPanel();
-    } else {
-        if (topicsWrapper) topicsWrapper.style.display = 'flex';
-    }
+    if (topicsWrapper) topicsWrapper.style.display = 'flex';
 }
 
 function toggleEditPanel() {
@@ -2159,11 +2153,7 @@ function renderTopicTabs() {
     allTab.onclick = () => filterByTopic('all');
     tabsList.appendChild(allTab);
 
-    const mode = searchSettings.searchMode || (searchSettings.allNews ? 'all' : 'topic');
-    if (mode === 'all') {
-        return;
-    }
-
+    const mode = searchSettings.searchMode === 'negative' ? 'negative' : 'topic';
     const uniqueTopicNames = [];
     const seenNames = new Set();
     const source = mode === 'negative'

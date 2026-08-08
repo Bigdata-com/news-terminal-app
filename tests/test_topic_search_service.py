@@ -99,9 +99,12 @@ def test_build_filters_sentiment_is_opt_in(service: TopicSearchService) -> None:
     }
 
 
-def test_build_filters_defaults_document_types(service: TopicSearchService) -> None:
+def test_build_filters_defaults_source_categories(service: TopicSearchService) -> None:
     filters = service._build_filters(7)
-    assert filters["document_type"] == {"mode": "INCLUDE", "values": ["NEWS", "TRANSCRIPT"]}
+    assert filters["category"] == {
+        "mode": "INCLUDE",
+        "values": ["news_public", "transcripts"],
+    }
 
 
 def test_build_filters_timestamp_window_is_ordered(service: TopicSearchService) -> None:

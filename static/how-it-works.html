@@ -26,6 +26,14 @@
         }
     </script>
     <style>
+        /* Shared style.css locks the body to 100vh with overflow hidden for the
+           terminal views; this docs page needs normal document scrolling. */
+        html, body {
+            height: auto;
+            min-height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
         .how-page {
             max-width: 920px;
             margin: 0 auto;
@@ -200,7 +208,7 @@
             <ul>
                 <li>Scoped to that company via an entity filter</li>
                 <li>Keeps positive and negative sentiment (drops neutral)</li>
-                <li>Sources: news and transcripts</li>
+                <li>Sources: public news and transcripts</li>
                 <li>Optional AI query expansion multiplies each topic into more phrases</li>
                 <li>UI relevance dropdown drops weak hits after results return</li>
             </ul>
@@ -211,9 +219,9 @@
     "filters": {
       "timestamp": { "start": "...", "end": "..." },
       "entity": { "all_of": ["&lt;entity_id&gt;"] },
-      "document_type": {
+      "category": {
         "mode": "INCLUDE",
-        "values": ["NEWS", "TRANSCRIPT"]
+        "values": ["news_public", "transcripts"]
       },
       "sentiment": {
         "values": ["positive", "negative"]
@@ -235,7 +243,7 @@
             <ul>
                 <li>Filter-only search — <strong>no query text</strong></li>
                 <li><code class="inline">search_mode: "fast"</code></li>
-                <li>Public news category only (<code class="inline">news_public</code>)</li>
+                <li>Sources: public news and transcripts (<code class="inline">news_public</code>, <code class="inline">transcripts</code>)</li>
                 <li>Entity matched in the headline (avoids drive-by body mentions)</li>
                 <li>Sentiment score in range <code class="inline">[-1, -0.3]</code></li>
                 <li>Bigdata taxonomy topics in <code class="inline">topic.any_of</code> (editable per category)</li>
@@ -249,7 +257,7 @@
       "timestamp": { "start": "...", "end": "..." },
       "category": {
         "mode": "INCLUDE",
-        "values": ["news_public"]
+        "values": ["news_public", "transcripts"]
       },
       "entity": {
         "search_in": "HEADLINE",
@@ -283,7 +291,7 @@
                 <li>Natural-language <code class="inline">query.text</code> (desk phrase as written)</li>
                 <li>No entity filter, no taxonomy topic filter</li>
                 <li>Positive + negative sentiment (neutral excluded)</li>
-                <li>Sources: news and transcripts</li>
+                <li>Sources: public news and transcripts</li>
                 <li>Optional AI expansion uses a desk-specific prompt</li>
             </ul>
             <p>Search payload (one call per theme phrase):</p>
@@ -292,9 +300,9 @@
     "text": "Brent and WTI crude oil prices rise or fall on shifting supply and demand outlook",
     "filters": {
       "timestamp": { "start": "...", "end": "..." },
-      "document_type": {
+      "category": {
         "mode": "INCLUDE",
-        "values": ["NEWS", "TRANSCRIPT"]
+        "values": ["news_public", "transcripts"]
       },
       "sentiment": {
         "values": ["positive", "negative"]
@@ -355,9 +363,9 @@
                     </tr>
                     <tr>
                         <td>Sources</td>
-                        <td>NEWS, TRANSCRIPT</td>
-                        <td>category news_public</td>
-                        <td>NEWS, TRANSCRIPT</td>
+                        <td>news_public, transcripts</td>
+                        <td>news_public, transcripts</td>
+                        <td>news_public, transcripts</td>
                     </tr>
                 </tbody>
             </table>

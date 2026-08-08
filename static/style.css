@@ -729,6 +729,19 @@ button:focus,
     margin: 0 4px;
 }
 
+/* Keep layout width when toggling Topic vs Negative (avoids filters-bar jump). */
+.filter-group.advanced-options.is-reserved-hidden,
+.filter-divider.advanced-options.is-reserved-hidden {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.topics-edit-btn .topics-label {
+    display: inline-block;
+    min-width: 7.5rem;
+    text-align: left;
+}
+
 /* Search Mode Buttons */
 .filter-mode-btn {
     background: #0d1117;
@@ -739,18 +752,21 @@ button:focus,
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
     border-radius: 4px;
     display: flex;
     align-items: center;
     gap: 4px;
+    box-sizing: border-box;
 }
 
 .filter-mode-btn.active {
     background: transparent;
-    border: 2px solid #58a6ff;
+    border-color: #58a6ff;
     color: #58a6ff;
     font-weight: 600;
+    /* Keep 1px border width; use inset shadow for emphasis so layout does not jump */
+    box-shadow: inset 0 0 0 1px #58a6ff;
 }
 
 .filter-mode-btn:hover:not(.active) {
