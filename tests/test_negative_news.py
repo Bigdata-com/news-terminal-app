@@ -67,7 +67,7 @@ def test_entity_search_in_is_headline() -> None:
 
 
 def test_sentiment_ranges_are_strongly_negative() -> None:
-    assert NEGATIVE_NEWS_SENTIMENT_RANGES == [{"min": -1, "max": -0.3}]
+    assert NEGATIVE_NEWS_SENTIMENT_RANGES == [{"min": -1, "max": -0.1}]
 
 
 def test_chunk_list_batches_one_entity_each() -> None:

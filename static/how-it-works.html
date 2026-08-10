@@ -245,7 +245,7 @@
                 <li><code class="inline">search_mode: "fast"</code></li>
                 <li>Sources: public news and transcripts (<code class="inline">news_public</code>, <code class="inline">transcripts</code>)</li>
                 <li>Entity matched in the headline (avoids drive-by body mentions)</li>
-                <li>Sentiment score in range <code class="inline">[-1, -0.3]</code></li>
+                <li>Sentiment score in range <code class="inline">[-1, -0.1]</code></li>
                 <li>Bigdata taxonomy topics in <code class="inline">topic.any_of</code> (editable per category)</li>
                 <li>One entity ID per request (clean ticker attribution on multi-ticker runs)</li>
             </ul>
@@ -264,7 +264,7 @@
         "any_of": ["&lt;entity_id&gt;"]
       },
       "sentiment": {
-        "ranges": [{ "min": -1, "max": -0.3 }]
+        "ranges": [{ "min": -1, "max": -0.1 }]
       },
       "topic": {
         "search_in": "ALL",
@@ -358,7 +358,7 @@
                     <tr>
                         <td>Sentiment</td>
                         <td>positive + negative</td>
-                        <td>range −1 … −0.3</td>
+                        <td>range −1 … −0.1</td>
                         <td>positive + negative</td>
                     </tr>
                     <tr>

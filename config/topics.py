@@ -397,8 +397,8 @@ NEGATIVE_NEWS_ENTITY_BATCH_SIZE: int = 1
 # Match the company in the headline so passing body mentions are excluded.
 NEGATIVE_NEWS_ENTITY_SEARCH_IN: str = "HEADLINE"
 
-# Only strongly negative sentiment qualifies as negative news.
-NEGATIVE_NEWS_SENTIMENT_RANGES: list[dict[str, float]] = [{"min": -1, "max": -0.3}]
+# Negative sentiment range for negative-news searches (mild through strongly negative).
+NEGATIVE_NEWS_SENTIMENT_RANGES: list[dict[str, float]] = [{"min": -1, "max": -0.1}]
 
 
 def safe_negative_news_categories_revision() -> int:
