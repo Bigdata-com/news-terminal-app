@@ -885,6 +885,30 @@ button:focus,
     font-weight: 500;
 }
 
+.filter-checkbox-label.is-disabled-demo {
+    opacity: 0.5;
+    cursor: not-allowed;
+    position: relative;
+}
+
+.filter-checkbox-label.is-disabled-demo:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 1000;
+    pointer-events: none;
+}
+
 /* Topics Edit Button */
 .topics-edit-btn {
     background: transparent;
@@ -1011,6 +1035,7 @@ button:focus,
 }
 
 .input-bar button#viewCommentaryBtn {
+    display: none !important;
     background: #58a6ff;
     border: none;
     color: #0d1117;
@@ -2055,5 +2080,158 @@ button:focus,
     .news-row-source {
         display: none;
     }
+}
+
+/* Launch gate: keep the terminal hidden until a key is saved */
+#appContent[hidden] {
+    display: none !important;
+}
+
+/* API key overlay */
+.api-key-nav-btn {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+}
+
+.api-key-nav-btn:hover {
+    background: #21262d;
+    color: #ffffff;
+}
+
+.settings-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: rgba(0, 0, 0, 0.7);
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-overlay.visible {
+    display: flex;
+}
+
+.settings-box {
+    width: 440px;
+    max-width: calc(100vw - 32px);
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.settings-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #e6edf3;
+}
+
+.settings-key-icon {
+    width: 20px;
+    height: 20px;
+    color: #8d99ae;
+}
+
+.settings-description {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #8b949e;
+}
+
+.api-key-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #0d1117;
+    padding: 0 8px 0 12px;
+}
+
+.api-key-input-wrap input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #e6edf3;
+    font-size: 13px;
+    padding: 10px 0;
+    outline: none;
+}
+
+.eye-btn {
+    background: transparent;
+    border: none;
+    color: #8b949e;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.eye-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.eye-btn:hover,
+.eye-btn.is-visible {
+    color: #e6edf3;
+}
+
+.api-key-status {
+    min-height: 18px;
+    margin: 10px 0 18px;
+    font-size: 12px;
+    color: #8b949e;
+}
+
+.settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.settings-actions button {
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    cursor: pointer;
+}
+
+.btn-close-settings,
+.btn-clear-key {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+}
+
+.btn-close-settings:hover,
+.btn-clear-key:hover {
+    background: #21262d;
+}
+
+.btn-save-key {
+    background: #238636;
+    border: 1px solid #238636;
+    color: #ffffff;
+}
+
+.btn-save-key:hover {
+    background: #2ea043;
 }
 

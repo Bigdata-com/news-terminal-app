@@ -3,16 +3,17 @@ Price Service for News Terminal
 Handles fetching and caching of stock prices and price changes from Bigdata API
 """
 
-import os
-import requests
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+import requests
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-BIGDATA_API_KEY = os.getenv("BIGDATA_API_KEY")
 BIGDATA_BASE_URL = "https://api.bigdata.com/v1"
 CACHE_TTL_MINUTES = 15  # 15 minute cache
 
@@ -41,7 +42,15 @@ def is_cache_valid(cache_entry: Dict) -> bool:
     return age < timedelta(minutes=CACHE_TTL_MINUTES)
 
 
-def get_latest_price(entity_id: str, ticker: str) -> Optional[Dict]:
+def _get_api_key(api_key: Optional[str]) -> str:
+    """Return a trimmed API key or raise if the caller did not provide one."""
+    key = (api_key or "").strip()
+    if not key:
+        raise ValueError("Bigdata API key is required")
+    return key
+
+
+def get_latest_price(entity_id: str, ticker: str, api_key: str) -> Optional[Dict]:
     """
     Fetch the latest intraday price for a ticker
     Returns: {"price": float, "currency": str} or None
@@ -54,7 +63,7 @@ def get_latest_price(entity_id: str, ticker: str) -> Optional[Dict]:
         response = requests.post(
             f"{BIGDATA_BASE_URL}/price/intraday/query",
             headers={
-                "X-API-KEY": BIGDATA_API_KEY,
+                "X-API-KEY": _get_api_key(api_key),
                 "Content-Type": "application/json"
             },
             json={
@@ -121,7 +130,7 @@ def get_latest_price(entity_id: str, ticker: str) -> Optional[Dict]:
         return None
 
 
-def get_price_change(entity_id: str, ticker: str) -> Optional[float]:
+def get_price_change(entity_id: str, ticker: str, api_key: str) -> Optional[float]:
     """
     Fetch the 1D price change percentage for a ticker
     Returns: float (percentage change) or None
@@ -130,7 +139,7 @@ def get_price_change(entity_id: str, ticker: str) -> Optional[float]:
         response = requests.post(
             f"{BIGDATA_BASE_URL}/price/changes/query",
             headers={
-                "X-API-KEY": BIGDATA_API_KEY,
+                "X-API-KEY": _get_api_key(api_key),
                 "Content-Type": "application/json"
             },
             json={
@@ -165,11 +174,13 @@ def get_price_change(entity_id: str, ticker: str) -> Optional[float]:
         return None
 
 
-def get_price_data(entity_id: str, ticker: str) -> Dict:
+def get_price_data(entity_id: str, ticker: str, api_key: str) -> Dict:
     """
     Get complete price data (price + change) for a ticker with caching
     Returns: {"price": float, "change": float, "currency": str}
     """
+    key = _get_api_key(api_key)
+
     # Check cache first
     if ticker in price_cache and is_cache_valid(price_cache[ticker]):
         logger.info(f"Price cache hit for {ticker}")
@@ -178,8 +189,8 @@ def get_price_data(entity_id: str, ticker: str) -> Dict:
     logger.info(f"Fetching price data for {ticker}")
     
     # Fetch price and change
-    price_data = get_latest_price(entity_id, ticker)
-    change_data = get_price_change(entity_id, ticker)
+    price_data = get_latest_price(entity_id, ticker, key)
+    change_data = get_price_change(entity_id, ticker, key)
     
     # Build result
     result = {
@@ -195,19 +206,24 @@ def get_price_data(entity_id: str, ticker: str) -> Dict:
     return result
 
 
-def get_prices_for_tickers(tickers_with_entities: List[Tuple[str, str]]) -> Dict[str, Dict]:
+def get_prices_for_tickers(
+    tickers_with_entities: List[Tuple[str, str]],
+    api_key: str,
+) -> Dict[str, Dict]:
     """
     Get price data for multiple tickers
     Args:
         tickers_with_entities: List of (ticker, entity_id) tuples
+        api_key: Caller-provided Bigdata.com API key
     Returns:
         Dict mapping ticker to price data
     """
+    key = _get_api_key(api_key)
     results = {}
     
     for ticker, entity_id in tickers_with_entities:
         try:
-            price_data = get_price_data(entity_id, ticker)
+            price_data = get_price_data(entity_id, ticker, key)
             results[ticker] = price_data
         except Exception as e:
             logger.error(f"Error fetching price for {ticker}: {e}")

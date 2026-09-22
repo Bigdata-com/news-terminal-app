@@ -35,17 +35,6 @@ let previousArticleIds = new Set();
 // UTILITIES
 // ============================================================================
 
-function fetchWithTimeout(url, options = {}) {
-    const { timeout = 30000, ...fetchOptions } = options;
-
-    return Promise.race([
-        fetch(url, fetchOptions),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Request timeout - operation is still running on the server')), timeout)
-        )
-    ]);
-}
-
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -106,7 +95,7 @@ function getDefaultTopicsFor(sectorId) {
 // INITIALIZATION
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', async function() {
+async function initializeSectorApp() {
     await loadSectors();
     loadSettings();
     parseUrlParameters();
@@ -123,6 +112,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             clearResults();
         }
     });
+}
+
+document.addEventListener('DOMContentLoaded', async function() {
+    setOnAppReady(initializeSectorApp);
+    const ready = await runLaunchGate();
+    if (ready) {
+        await initializeSectorApp();
+    }
 });
 
 /**
@@ -142,9 +139,8 @@ function parseUrlParameters() {
 
     const expandParam = urlParams.get('expand');
     if (expandParam !== null) {
-        sectorSettings.queryReformulation = expandParam.toLowerCase() === 'true';
+        sectorSettings.queryReformulation = false;
         changed = true;
-        console.log(`AI query expansion set to ${sectorSettings.queryReformulation} via URL parameter`);
     }
 
     if (changed) {
@@ -227,10 +223,8 @@ function loadSettings() {
         sectorSettings.days = 7;
     }
 
-    // Backfill fields added after a user's settings were first written
-    if (sectorSettings.queryReformulation === undefined) {
-        sectorSettings.queryReformulation = false;
-    }
+    // AI query expansion is disabled on the demo app
+    sectorSettings.queryReformulation = false;
     if (sectorSettings.autoRefresh === undefined) {
         sectorSettings.autoRefresh = false;
     }
@@ -420,14 +414,9 @@ function updateActiveSectorLabel() {
 function initializeFilters() {
     const reformulateToggle = document.getElementById('reformulateToggle');
     if (reformulateToggle) {
-        reformulateToggle.checked = sectorSettings.queryReformulation;
-
-        // Without Gemini configured the backend silently falls back to the original phrases
-        if (!queryExpansionAvailable) {
-            reformulateToggle.disabled = true;
-            reformulateToggle.closest('.filter-checkbox-label').title =
-                'AI query expansion needs Gemini credentials configured on the server';
-        }
+        sectorSettings.queryReformulation = false;
+        reformulateToggle.checked = false;
+        reformulateToggle.disabled = true;
     }
 
     document.querySelectorAll('.date-btn').forEach(btn => {
@@ -450,15 +439,7 @@ function initializeFilters() {
 }
 
 function toggleReformulate() {
-    const reformulateToggle = document.getElementById('reformulateToggle');
-    sectorSettings.queryReformulation = reformulateToggle.checked;
-    saveSettingsToStorage();
-
-    showNotification(
-        sectorSettings.queryReformulation
-            ? 'AI query expansion ON - 4x queries per search'
-            : 'AI query expansion OFF'
-    );
+    return;
 }
 
 // ============================================================================
@@ -489,7 +470,7 @@ async function getSectorNews(isRefresh = false) {
             days: sectorSettings.days,
             relevance: 0.1,
             topics: sectorSettings.topics,
-            query_reformulation: sectorSettings.queryReformulation
+            query_reformulation: false
         };
 
         // On refresh, only ask for what has been published since the last fetch

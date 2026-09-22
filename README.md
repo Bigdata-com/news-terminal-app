@@ -69,6 +69,7 @@ news_terminal/
 │   ├── sector.html         # Sector terminal (/sector)
 │   ├── how-it-works.html   # Docs page (/how-it-works)
 │   ├── style.css           # Shared styles for both terminals
+│   ├── api-key.js          # Client-only Bigdata API key + launch gate
 │   ├── app.js              # Company terminal logic
 │   └── sector.js           # Sector terminal logic
 ├── docs/                   # Documentation
@@ -82,14 +83,15 @@ news_terminal/
 ### Prerequisites
 - Python 3.11+
 - UV package manager
-- Bigdata.com API key
+- A Bigdata.com API key (entered in the browser on first visit)
 
 ### Local Development
 
 1. **Clone and setup**:
    ```bash
    cd news_terminal
-   echo "BIGDATA_API_KEY=your_api_key_here" > .env
+   # Optional: Gemini for commentary / query expansion (see env_example.txt)
+   # cp env_example.txt .env
    ```
 
 2. **Create virtual environment and install dependencies**:
@@ -104,11 +106,18 @@ news_terminal/
    uv run python main.py
    ```
 
+   The server starts **without** a `BIGDATA_API_KEY`. News search uses the key each user
+   enters in the launch overlay (stored in ``localStorage`` as ``bigdata_api_key`` and
+   sent as ``X-API-KEY``). The same key is used for outbound calls to api.bigdata.com.
+
 4. **Open your browser**:
    ```
    http://localhost:8000
    ```
-   
+
+   On first visit, enter your Bigdata.com API key. Use the header **API Key** button to
+   change or clear it later.
+
    **Enable auto-refresh for demo/debugging (refreshes every 60 seconds):**
    ```
    http://localhost:8000/?autoRefresh=true
@@ -124,7 +133,7 @@ news_terminal/
    ```
 
 This script will:
-- Check for `.env` file and API key
+- Load optional `.env` (Gemini / CLI only — no server Bigdata key required)
 - Stop any existing containers
 - Kill any processes using port 8000
 - Rebuild the Docker image
@@ -354,10 +363,14 @@ identically.
 
 ## Configuration
 
-Environment variables in `.env`:
+The **web UI does not use a server-side Bigdata key.** Each visitor provides their own
+key; it never leaves the browser except as the ``X-API-KEY`` header on `/api/*` calls.
+
+``BIGDATA_API_KEY`` in `.env` is optional and used only by CLI scripts and live e2e tests.
 
 ```env
-BIGDATA_API_KEY=your_api_key_here
+# Optional — CLI / e2e only. The web app asks for the key in the browser.
+# BIGDATA_API_KEY=your_api_key_here
 
 # Optional: Gemini — use EITHER Vertex (below) OR AI Studio API key, not both.
 # Vertex (recommended for GCP): see env_example.txt for full matrix.
@@ -456,7 +469,7 @@ See ``env_example.txt`` for a copy-paste template.
 ### Common Issues
 
 **"API key not configured" / Gemini 401 on Vertex**
-- ``BIGDATA_API_KEY`` is always required for news search.
+- News search requires your Bigdata.com key in the browser overlay (``X-API-KEY``). There is no server default.
 - For **Vertex**, use OAuth (service account file or ``gcloud auth application-default login``); do not rely on ``GEMINI_API_KEY`` while ``GOOGLE_GENAI_USE_VERTEXAI=true``.
 - For **AI Studio**, set ``GEMINI_API_KEY`` and disable Vertex for that environment.
 - If ``GOOGLE_APPLICATION_CREDENTIALS`` points to a missing file, the app logs a warning and falls back to ADC; fix the path if you intended to use that service account.

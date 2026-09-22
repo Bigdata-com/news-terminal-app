@@ -1,4 +1,6 @@
-BIGDATA_API_KEY=YOUR_KEY_HERE
+# Optional: CLI scripts and live e2e tests only.
+# The web UI asks each user for their own Bigdata.com API key (browser localStorage).
+# BIGDATA_API_KEY=YOUR_KEY_HERE
 
 # Gemini AI — pick Vertex (GCP) OR AI Studio (API key), not both.
 

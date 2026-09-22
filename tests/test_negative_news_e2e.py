@@ -87,15 +87,14 @@ def test_negative_news_live_api_aapl() -> None:
 @pytest.mark.skipif(not HAS_LIVE_KEY, reason="BIGDATA_API_KEY not configured")
 def test_negative_news_live_http_endpoint() -> None:
     """End-to-end via FastAPI TestClient POST /api/news/{ticker}."""
-    import httpx
     from fastapi.testclient import TestClient
 
-    # Import after env is loaded so main.py accepts the key
     import main as app_module
 
     with TestClient(app_module.app) as client:
         response = client.post(
             "/api/news/AAPL",
+            headers={"X-API-KEY": BIGDATA_API_KEY},
             json={
                 "negative_news": True,
                 "basic_search": False,

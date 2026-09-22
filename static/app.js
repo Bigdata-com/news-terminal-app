@@ -45,26 +45,21 @@ let currentCommentary = null; // Store generated commentary
 const COMMENTARY_STORAGE_KEY = 'news_terminal_commentaries';
 const MAX_SAVED_COMMENTARIES = 10; // Keep last 10 commentaries
 
-// Utility function: fetch with timeout
-function fetchWithTimeout(url, options = {}) {
-    const { timeout = 30000, ...fetchOptions } = options; // Default 30s timeout
-    
-    return Promise.race([
-        fetch(url, fetchOptions),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Request timeout - operation is still running on the server')), timeout)
-        )
-    ]);
-}
-
-// Initialize when page loads
-document.addEventListener('DOMContentLoaded', async function() {
+async function initializeCompaniesApp() {
     await loadDefaultTopics();
     loadSettings();
-    parseUrlParameters(); // Parse URL parameters and override settings if needed
+    parseUrlParameters();
     populateCommentaryDropdown();
     setupEventListeners();
-    initializeFilters(); // This will update topics count after settings are loaded
+    initializeFilters();
+}
+
+document.addEventListener('DOMContentLoaded', async function() {
+    setOnAppReady(initializeCompaniesApp);
+    const ready = await runLaunchGate();
+    if (ready) {
+        await initializeCompaniesApp();
+    }
 });
 
 function setupEventListeners() {
@@ -142,7 +137,7 @@ async function getNews(isRefresh = false) {
             negative_news: searchSettings.searchMode === 'negative',
             relevance: getRelevanceSetting(),
             days: searchSettings.days,
-            query_reformulation: searchSettings.searchMode === 'topic' && searchSettings.queryReformulation
+            query_reformulation: false
         };
         
         // On refresh, only fetch articles since last refresh (incremental update)
@@ -165,7 +160,7 @@ async function getNews(isRefresh = false) {
         if (isMultipleTickers) {
             // Multi-ticker: add tickers array to body
             requestBody.tickers = ticker.split(',').map(t => t.trim());
-            response = await fetch('/api/news-multi', {
+            response = await apiRequest('/api/news-multi', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -174,7 +169,7 @@ async function getNews(isRefresh = false) {
             });
         } else {
             // Single ticker: ticker in URL path
-            response = await fetch(`/api/news/${ticker}`, {
+            response = await apiRequest(`/api/news/${ticker}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -553,7 +548,7 @@ async function fetchAndDisplayPrices(newsData, isMultipleTickers) {
     const tickerList = Array.from(tickers).join(',');
     
     try {
-        const response = await fetch(`/api/prices?tickers=${encodeURIComponent(tickerList)}`);
+        const response = await apiRequest(`/api/prices?tickers=${encodeURIComponent(tickerList)}`);
         const data = await response.json();
         
         if (response.ok) {
@@ -811,7 +806,7 @@ function stopAutoRefresh() {
 // ============================================================
 
 function showCommentaryButton() {
-    document.getElementById('viewCommentaryBtn').style.display = 'block';
+    return;
 }
 
 function hideCommentaryButton() {
@@ -870,7 +865,7 @@ async function generateCommentary() {
             negative_news: searchSettings.searchMode === 'negative',
             relevance: getRelevanceSetting(),
             days: searchSettings.days,
-            query_reformulation: searchSettings.searchMode === 'topic' && searchSettings.queryReformulation
+            query_reformulation: false
         };
         
         if (searchSettings.searchMode === 'topic' && searchSettings.topics.length > 0) {
@@ -884,9 +879,7 @@ async function generateCommentary() {
         const topicCount = searchSettings.searchMode === 'negative'
             ? searchSettings.negativeCategories.length
             : searchSettings.topics.length;
-        const expectedCalls = (searchSettings.searchMode === 'topic' && searchSettings.queryReformulation)
-            ? topicCount * 4
-            : topicCount;
+        const expectedCalls = topicCount;
         const estimatedMinutes = Math.ceil(expectedCalls / 20); // Rough estimate at ~20 calls/min with rate limiting
         
         console.log('Fetching full news data for commentary generation...');
@@ -1414,10 +1407,8 @@ function loadSettings() {
             if (typeof searchSettings.relevance !== 'number' || !isFinite(searchSettings.relevance)) {
                 searchSettings.relevance = 0.1;
             }
-            // Ensure queryReformulation field exists (default false)
-            if (searchSettings.queryReformulation === undefined) {
-                searchSettings.queryReformulation = false;
-            }
+            // AI query expansion is disabled on the demo app
+            searchSettings.queryReformulation = false;
             // Ensure autoRefresh field exists (default false)
             if (searchSettings.autoRefresh === undefined) {
                 searchSettings.autoRefresh = false;
@@ -1496,8 +1487,13 @@ function initializeFilters() {
         relevanceSelect.value = String(getRelevanceSetting());
     }
     
-    // Set AI expansion checkbox
-    document.getElementById('reformulateToggle').checked = searchSettings.queryReformulation;
+    // AI expansion is disabled on the demo app
+    searchSettings.queryReformulation = false;
+    const reformulateToggle = document.getElementById('reformulateToggle');
+    if (reformulateToggle) {
+        reformulateToggle.checked = false;
+        reformulateToggle.disabled = true;
+    }
     
     // Initialize date button click handlers
     document.querySelectorAll('.date-btn').forEach(btn => {
@@ -1610,17 +1606,7 @@ function toggleSelective() {
 }
 
 function toggleReformulate() {
-    const reformulateToggle = document.getElementById('reformulateToggle');
-    searchSettings.queryReformulation = reformulateToggle.checked;
-    
-    // Save to localStorage
-    saveSettingsToStorage();
-    
-    console.log('Query Reformulation toggle:', reformulateToggle.checked ? 'ON' : 'OFF');
-    
-    // Show notification about the change
-    const status = reformulateToggle.checked ? 'enabled' : 'disabled';
-    showNotification(`Query reformulation ${status}${reformulateToggle.checked ? ' (generates 3 variations per topic)' : ''}`);
+    return;
 }
 
 function updateTopicsDropdownVisibility() {

@@ -90,8 +90,9 @@
                     </nav>
                 </div>
 
-                <!-- Right: Powered By + App Grid Icon -->
+                <!-- Right: API Key + Powered By + App Grid Icon -->
                 <div class="flex items-center space-x-6">
+                    <button type="button" class="api-key-nav-btn" onclick="openSettings()">API Key</button>
                     <!-- Powered By Text -->
                     <span class="hidden lg:inline text-sm text-gray-400">
                         Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
@@ -121,7 +122,7 @@
     </header>
 
     <!-- Terminal Application -->
-    <div class="terminal-container">
+    <div id="appContent" class="terminal-container" hidden>
         <!-- Sector Tiles -->
         <div class="sector-tiles-bar">
             <label class="sector-tiles-label">COMMODITY:</label>
@@ -169,8 +170,8 @@
 
             <!-- AI Query Expansion -->
             <div class="filter-group">
-                <label class="filter-checkbox-label" title="Generate 3 extra phrasings per topic using this desk's expansion prompt">
-                    <input type="checkbox" id="reformulateToggle" class="filter-checkbox-input" onchange="toggleReformulate()">
+                <label class="filter-checkbox-label is-disabled-demo" data-tooltip="Disabled on demo app" title="Disabled on demo app">
+                    <input type="checkbox" id="reformulateToggle" class="filter-checkbox-input" disabled>
                     <span class="checkbox-custom"></span>
                     <span class="checkbox-label-text">AI Query Expansion</span>
                 </label>
@@ -236,7 +237,36 @@
         </div>
     </div>
 
-    <script src="/static/sector.js?v=1.0"></script>
+    <div id="settingsOverlay" class="settings-overlay">
+        <div class="settings-box">
+            <h2 class="settings-title">
+                <svg class="settings-key-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M7 14a5 5 0 1 1 4.9-6H21v3h-2v2h-2v2h-3.1A5 5 0 0 1 7 14zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="currentColor"/>
+                </svg>
+                Bigdata API Key
+            </h2>
+            <p id="settingsApiKeyDescription" class="settings-description">
+                Enter your Bigdata API key to authenticate requests.
+            </p>
+            <div class="api-key-input-wrap">
+                <input type="password" id="settingsApiKey" placeholder="bd_v1_..." autocomplete="off">
+                <button type="button" class="eye-btn" onclick="toggleApiKeyVisibility()" aria-label="Show API key">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill="currentColor"/>
+                    </svg>
+                </button>
+            </div>
+            <p id="apiKeyStatus" class="api-key-status"></p>
+            <div class="settings-actions">
+                <button type="button" class="btn-close-settings" onclick="closeSettings()">Cancel</button>
+                <button type="button" class="btn-clear-key" onclick="clearApiKey()">Clear</button>
+                <button type="button" class="btn-save-key" onclick="saveApiKey()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/api-key.js?v=1.0"></script>
+    <script src="/static/sector.js?v=1.2"></script>
 
     <script>
         // Header tooltip for app grid

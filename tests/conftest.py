@@ -22,3 +22,10 @@ def clear_gemini_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for key in keys:
         monkeypatch.delenv(key, raising=False)
     yield
+
+
+@pytest.fixture
+def clear_bigdata_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Remove server-side Bigdata key so web-app tests cannot fall back to env."""
+    monkeypatch.delenv("BIGDATA_API_KEY", raising=False)
+    yield

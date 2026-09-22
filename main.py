@@ -4,23 +4,27 @@ Financial News Terminal
 Single-file FastAPI backend with Bigdata.com API integration
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
-import requests
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional, Any
-import uvicorn
+from typing import Dict, List, Optional
+
 from dotenv import load_dotenv
-import logging
-from contextlib import asynccontextmanager
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+import requests
+import uvicorn
 
 # Import services
 from services import price_service
-from services.topic_search_service import TopicSearchService
+from services.company_cache import CompanyDataCache
+from services.rate_limiter import RateLimiter
 from services.report_service import ReportService
+from services.topic_search_service import TopicSearchService
 from config.topics import (
     DEFAULT_TOPICS,
     NEGATIVE_NEWS_CATEGORIES,
@@ -108,39 +112,29 @@ service_logger.setLevel(getattr(logging, log_level, logging.INFO))
 
 logger.info(f"Logging configured at {log_level} level")
 
-# Global service instances
-topic_search_service: Optional[TopicSearchService] = None
+# Global service instances (Gemini only — Bigdata clients are per-request)
 report_service: Optional[ReportService] = None
+shared_rate_limiter = RateLimiter(max_tokens=200, refill_period=60)
+shared_company_cache = CompanyDataCache(ttl_hours=24)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage service lifecycle (startup/shutdown)"""
-    global topic_search_service, report_service
-    
-    # Startup: Initialize services
+    global report_service
+
     logger.info("Starting up: Initializing services...")
-    topic_search_service = TopicSearchService(
-        api_key=BIGDATA_API_KEY,
-        base_url=BIGDATA_BASE_URL
-    )
-    logger.info("TopicSearchService initialized")
-    
-    # Initialize ReportService (for commentary generation)
+
     try:
         report_service = ReportService()
         logger.info("ReportService initialized")
     except Exception as e:
         logger.warning(f"ReportService initialization failed: {e}. Commentary features will be unavailable.")
         report_service = None
-    
+
     yield
-    
-    # Shutdown: Close HTTP session
-    logger.info("Shutting down: Closing services...")
-    if topic_search_service:
-        await topic_search_service.close()
-    logger.info("Services closed")
+
+    logger.info("Shutting down: services closed")
 
 
 # FastAPI app with lifespan management
@@ -154,13 +148,49 @@ app = FastAPI(
 # Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Configuration
-BIGDATA_API_KEY = os.getenv("BIGDATA_API_KEY")
+# Configuration — no server-side Bigdata key; callers send X-API-KEY
 BIGDATA_BASE_URL = "https://api.bigdata.com/v1"
 
-if not BIGDATA_API_KEY:
-    logger.error("BIGDATA_API_KEY not found in environment variables")
-    raise ValueError("BIGDATA_API_KEY environment variable is required")
+
+class MissingBigdataApiKey(Exception):
+    """Raised when the incoming X-API-KEY header is missing or empty."""
+
+
+@app.exception_handler(MissingBigdataApiKey)
+async def missing_api_key_handler(_request: Request, _exc: MissingBigdataApiKey) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={
+            "error": "API key required",
+            "message": "Please provide your Bigdata API key via the X-API-KEY request header",
+        },
+    )
+
+
+def require_bigdata_api_key(
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
+) -> str:
+    """Require a non-empty X-API-KEY header. No environment fallback."""
+    key = (x_api_key or "").strip()
+    if not key:
+        raise MissingBigdataApiKey()
+    return key
+
+
+async def get_topic_search_service(
+    api_key: str = Depends(require_bigdata_api_key),
+) -> AsyncIterator[TopicSearchService]:
+    """Build a TopicSearchService for this request using the caller's key."""
+    service = TopicSearchService(
+        api_key=api_key,
+        base_url=BIGDATA_BASE_URL,
+        rate_limiter=shared_rate_limiter,
+        company_cache=shared_company_cache,
+    )
+    try:
+        yield service
+    finally:
+        await service.close()
 
 # Simple in-memory caches
 news_cache: Dict[str, Dict] = {}
@@ -184,7 +214,7 @@ def format_timestamp(dt: datetime) -> str:
     milliseconds = dt.microsecond // 1000
     return f"{iso_str}.{milliseconds:03d}Z"
 
-def get_entity_id(ticker: str) -> Optional[str]:
+def get_entity_id(ticker: str, api_key: str) -> Optional[str]:
     """Get entity ID for ticker with caching"""
     
     if ticker in entity_cache:
@@ -197,7 +227,7 @@ def get_entity_id(ticker: str) -> Optional[str]:
         response = requests.post(
             f"{BIGDATA_BASE_URL}/knowledge-graph/companies",
             headers={
-                "X-API-KEY": BIGDATA_API_KEY,
+                "X-API-KEY": api_key,
                 "Content-Type": "application/json"
             },
             json={
@@ -228,7 +258,7 @@ def get_entity_id(ticker: str) -> Optional[str]:
     
     return None
 
-def get_ticker_news(ticker: str, days: int = 7) -> List[Dict]:
+def get_ticker_news(ticker: str, api_key: str, days: int = 7) -> List[Dict]:
     """Get news for ticker with simple caching"""
     
     cache_key = f"{ticker}_{days}"
@@ -243,7 +273,7 @@ def get_ticker_news(ticker: str, days: int = 7) -> List[Dict]:
     logger.info(f"Fetching news for ticker: {ticker} (last {days} days)")
     
     # Get entity ID
-    entity_id = get_entity_id(ticker)
+    entity_id = get_entity_id(ticker, api_key)
     if not entity_id:
         logger.warning(f"Could not resolve entity ID for {ticker}")
         return []
@@ -256,7 +286,7 @@ def get_ticker_news(ticker: str, days: int = 7) -> List[Dict]:
         response = requests.post(
             f"{BIGDATA_BASE_URL}/search",
             headers={
-                "X-API-KEY": BIGDATA_API_KEY,
+                "X-API-KEY": api_key,
                 "Content-Type": "application/json"
             },
             json={
@@ -403,7 +433,8 @@ async def how_it_works_page():
 @app.post("/api/news/{ticker}")
 async def get_news(
     ticker: str,
-    request: NewsSearchRequest
+    request: NewsSearchRequest,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
 ):
     """
     Get news for a ticker (POST request with JSON body).
@@ -438,10 +469,7 @@ async def get_news(
     ticker = ticker.upper().strip()
     if not ticker or len(ticker) > 10:
         raise HTTPException(status_code=400, detail="Invalid ticker symbol")
-    
-    if not topic_search_service:
-        raise HTTPException(status_code=503, detail="Search service not initialized")
-    
+
     try:
         # Determine lookback period (use since_minutes for incremental refresh)
         if since_minutes:
@@ -593,7 +621,10 @@ async def get_news(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/news-multi")
-async def get_news_multi(request: NewsMultiSearchRequest):
+async def get_news_multi(
+    request: NewsMultiSearchRequest,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
+):
     """
     Get news for multiple tickers (POST request with JSON body).
     
@@ -632,10 +663,7 @@ async def get_news_multi(request: NewsMultiSearchRequest):
     
     if len(ticker_list) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 tickers allowed (topic search is intensive)")
-    
-    if not topic_search_service:
-        raise HTTPException(status_code=503, detail="Search service not initialized")
-    
+
     try:
         # Determine lookback period (use since_minutes for incremental refresh)
         if since_minutes:
@@ -793,7 +821,10 @@ async def get_sectors():
     }
 
 @app.post("/api/sector-news")
-async def get_sector_news(request: SectorNewsRequest):
+async def get_sector_news(
+    request: SectorNewsRequest,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
+):
     """
     Get theme-based news for a sector (no company/entity filter).
 
@@ -811,9 +842,6 @@ async def get_sector_news(request: SectorNewsRequest):
         sector = get_sector(request.sector)
     except UnknownSectorError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    if not topic_search_service:
-        raise HTTPException(status_code=503, detail="Search service not initialized")
 
     # Custom phrases from the UI take precedence over the server defaults
     if request.topics:
@@ -871,7 +899,11 @@ async def get_sector_news(request: SectorNewsRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/api/search/{query}")
-async def search_news(query: str, days: int = 7):
+async def search_news(
+    query: str,
+    days: int = 7,
+    api_key: str = Depends(require_bigdata_api_key),
+):
     """Search news by text query (fallback for when entity lookup fails)"""
     
     query = query.strip()
@@ -885,7 +917,7 @@ async def search_news(query: str, days: int = 7):
         response = requests.post(
             f"{BIGDATA_BASE_URL}/search",
             headers={
-                "X-API-KEY": BIGDATA_API_KEY,
+                "X-API-KEY": api_key,
                 "Content-Type": "application/json"
             },
             json={
@@ -938,7 +970,10 @@ async def search_news(query: str, days: int = 7):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/prices")
-async def get_prices(tickers: str):
+async def get_prices(
+    tickers: str,
+    api_key: str = Depends(require_bigdata_api_key),
+):
     """
     Get price data for comma-separated tickers
     Returns: {"AAPL": {"price": 175.50, "change": 2.34, "currency": "USD"}, ...}
@@ -958,7 +993,7 @@ async def get_prices(tickers: str):
         # Get entity IDs for all tickers (reuse from news cache)
         tickers_with_entities = []
         for ticker in ticker_list:
-            entity_id = get_entity_id(ticker)
+            entity_id = get_entity_id(ticker, api_key)
             if entity_id:
                 tickers_with_entities.append((ticker, entity_id))
             else:
@@ -968,7 +1003,7 @@ async def get_prices(tickers: str):
             raise HTTPException(status_code=404, detail="No valid tickers found")
         
         # Fetch prices using price service
-        price_data = price_service.get_prices_for_tickers(tickers_with_entities)
+        price_data = price_service.get_prices_for_tickers(tickers_with_entities, api_key)
         
         # Format response
         response = {}
@@ -991,7 +1026,10 @@ async def get_prices(tickers: str):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/generate-commentary")
-async def generate_commentary(news_data: Dict):
+async def generate_commentary(
+    news_data: Dict,
+    _api_key: str = Depends(require_bigdata_api_key),
+):
     """
     Generate AI-powered commentary (briefs + desk note) from news data.
     
@@ -1065,7 +1103,8 @@ async def get_config():
         "available_configs": list_available_configs(),
         "topic_count": len(DEFAULT_TOPICS),
         "negative_category_count": len(NEGATIVE_NEWS_CATEGORIES),
-        "commentary_available": report_service is not None
+        "commentary_available": report_service is not None,
+        "bigdata_api_key_configured": False,
     }
 
 @app.get("/api/health")
@@ -1079,11 +1118,11 @@ async def health_check():
             "news_cache_size": len(news_cache),
             "price_cache_size": len(price_service.price_cache)
         },
-        "api_key_configured": bool(BIGDATA_API_KEY)
+        "api_key_configured": False,
     }
 
 @app.post("/api/cache/clear")
-async def clear_cache():
+async def clear_cache(_api_key: str = Depends(require_bigdata_api_key)):
     """Clear all caches"""
     global news_cache, entity_cache
     
@@ -1108,7 +1147,7 @@ async def clear_cache():
     }
 
 @app.get("/api/cache/stats")
-async def cache_stats():
+async def cache_stats(_api_key: str = Depends(require_bigdata_api_key)):
     """Get cache statistics"""
     return {
         "cache_stats": {
@@ -1134,7 +1173,7 @@ async def cache_stats():
 
 if __name__ == "__main__":
     logger.info("Starting News Terminal MVP...")
-    logger.info(f"API Key configured: {bool(BIGDATA_API_KEY)}")
+    logger.info("Bigdata API key is user-provided via X-API-KEY (no server default)")
     
     # Configure uvicorn to use our logging
     log_config = uvicorn.config.LOGGING_CONFIG

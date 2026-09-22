@@ -11,28 +11,18 @@ echo "========================================="
 CONTAINER_NAME="news-terminal"
 IMAGE_NAME="news-terminal:latest"
 
-# Load environment variables from .env file
+# Load environment variables from .env file (Gemini / optional CLI key)
 if [ -f .env ]; then
     echo "📄 Loading environment variables from .env..."
     export $(grep -v '^#' .env | xargs)
     echo "✅ Environment variables loaded"
 else
-    echo "⚠️  No .env file found"
-    echo "   Creating a sample .env file..."
-    echo "BIGDATA_API_KEY=your_api_key_here" > .env
-    echo "   Please edit .env and add your actual API key, then run this script again"
-    exit 1
+    echo "ℹ️  No .env file found (optional)"
+    echo "   The web UI asks each user for a Bigdata.com API key in the browser."
+    echo "   Add GEMINI_API_KEY to .env if you want commentary / query expansion."
 fi
 
-# Check if API key is set
-if [ -z "$BIGDATA_API_KEY" ] || [ "$BIGDATA_API_KEY" = "your_api_key_here" ]; then
-    echo "❌ BIGDATA_API_KEY not found or not configured in .env file"
-    echo "   Please add your actual API key to .env file:"
-    echo "   BIGDATA_API_KEY=bd_v1_your_key_here"
-    exit 1
-else
-    echo "✅ BIGDATA_API_KEY found"
-fi
+echo "ℹ️  Bigdata API key is entered in the browser (no server key required)"
 
 # Check for Vertex AI service account file (optional)
 SERVICE_ACCOUNT_FILE="gemini-product-sandbox-8ece44ee190e.json"
