@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bigdata Location Terminal</title>
+    <link rel="icon" type="image/png" href="https://app.bigdata.com/icons/logo-squared-production-512x512.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-primary': '#151515',
+                        'accent-subtle': '#8d99ae',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Tooltip for header */
+        .tooltip {
+            position: absolute;
+            background: #21262d;
+            color: #c9d1d9;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #30363d;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .tooltip.show {
+            opacity: 1;
+        }
+
+        /* Dropdown panel for "How it works" */
+        .dropdown-panel {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 8px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            z-index: 50;
+        }
+
+        .dropdown-panel.show {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-bg-primary text-gray-100 font-sans">
+    <!-- Sticky Header -->
+    <header class="sticky top-0 z-50 bg-black/70 backdrop-blur-sm border-b border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Left: Logo + Title + Nav -->
+                <div class="flex items-center space-x-3">
+                    <a href="https://platform.bigdata.com/" class="flex items-center">
+                        <img
+                            src="https://cdn.sanity.io/images/5zq5cwwy/production/31c4eb42fc009ee6678a5ec6e381530b99d740c4-166x36.svg"
+                            alt="BigData Logo"
+                            class="h-8"
+                            onerror="this.outerHTML='<span class=\'text-white font-bold\'>BigData</span>'"
+                        >
+                    </a>
+                    <span class="text-white text-base font-medium">News Terminal Demo</span>
+                    <nav class="terminal-nav">
+                        <a href="/" class="terminal-nav-link">Companies</a>
+                        <a href="/sector" class="terminal-nav-link">Commodities</a>
+                        <a href="/location" class="terminal-nav-link active">Location</a>
+                        <a href="/how-it-works" class="terminal-nav-link">How it works</a>
+                    </nav>
+                </div>
+
+                <!-- Right: API Key + Powered By + App Grid Icon -->
+                <div class="flex items-center space-x-6">
+                    <button type="button" class="api-key-nav-btn" onclick="openSettings()">API Key</button>
+                    <!-- Powered By Text -->
+                    <span class="hidden lg:inline text-sm text-gray-400">
+                        Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
+                    </span>
+
+                    <!-- App Grid Icon -->
+                    <div class="relative flex items-center">
+                        <a
+                            href="https://platform.bigdata.com/demo-apps-library"
+                            class="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-700 transition-colors group"
+                            id="appGridIcon"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 group-hover:text-white" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM6,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM6,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM16,6c0,1.1 0.9,2 2,2s2,-0.9 2,-2 -0.9,-2 -2,-2 -2,0.9 -2,6zM12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,14c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,20c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2z"></path>
+                            </svg>
+                        </a>
+                        <div id="appGridTooltip" class="tooltip">More Demo Apps</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile: Powered By Text -->
+            <div class="lg:hidden pb-3 text-xs text-gray-400">
+                Powered by <a href="https://docs.bigdata.com/api-reference/search/search-documents" class="text-accent-subtle hover:underline">Search API</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Terminal Application -->
+    <div id="appContent" class="terminal-container" hidden>
+        <!-- Location lookup (Knowledge Graph places) -->
+        <div class="input-bar lookup-bar">
+            <label for="placeInput">LOCATION:</label>
+            <div id="placePicked" class="picked-list"></div>
+            <div class="lookup">
+                <input type="text" id="placeInput" class="lookup-input" placeholder="Look up a country, region or city, e.g. Chile" autocomplete="off">
+                <div id="placeResults" class="lookup-results" hidden></div>
+            </div>
+        </div>
+
+        <!-- Topic lookup (Knowledge Graph event taxonomy) -->
+        <div class="input-bar lookup-bar">
+            <label for="topicInput">TOPICS:</label>
+            <div id="topicPicked" class="picked-list"></div>
+            <div class="lookup">
+                <input type="text" id="topicInput" class="lookup-input" placeholder="Add an event topic, e.g. strike, protest, mine accident" autocomplete="off">
+                <div id="topicResults" class="lookup-results" hidden></div>
+            </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="input-bar">
+            <label>DESK:</label>
+            <span id="activeLocationLabel" class="active-sector-label">No location selected</span>
+            <button id="getNewsBtn" onclick="getLocationNews()">GET NEWS</button>
+            <button id="clearBtn" onclick="clearResults()">CLEAR</button>
+            <button id="payloadBtn" class="payload-btn" onclick="togglePayloadPanel()" disabled>PAYLOAD</button>
+            <span id="articleCount" class="article-count"></span>
+        </div>
+
+        <!-- Filters Bar -->
+        <div class="filters-bar">
+            <div class="filter-group">
+                <label class="filter-label">RANGE:</label>
+                <div class="date-filter-buttons">
+                    <button class="date-btn" data-days="1">1D</button>
+                    <button class="date-btn active" data-days="7">1W</button>
+                    <button class="date-btn" data-days="30">1M</button>
+                    <button class="date-btn" data-days="90">3M</button>
+                    <button class="date-btn" data-days="180">6M</button>
+                    <button class="date-btn" data-days="365">1Y</button>
+                </div>
+            </div>
+
+            <div class="filter-divider"></div>
+
+            <div class="filter-group">
+                <label class="filter-checkbox-label" title="The API filters per document, so other chunks of a matching document come back too. On: show only chunks that themselves mention the place and the topic.">
+                    <input type="checkbox" id="strictToggle" class="filter-checkbox-input" checked>
+                    <span class="checkbox-custom"></span>
+                    <span class="checkbox-label-text">Chunk must mention place + topic</span>
+                </label>
+            </div>
+
+            <div class="filter-divider"></div>
+
+            <div class="filter-group">
+                <label class="filter-label" for="maxChunksInput">CHUNKS / TOPIC:</label>
+                <input type="number" id="maxChunksInput" class="chunks-input" min="1" max="500" placeholder="auto">
+            </div>
+
+            <div class="filter-group-right legend">
+                <span class="hl-place">place</span>
+                <span class="hl-topic">topic</span>
+            </div>
+        </div>
+
+        <!-- Request payload panel (hidden by default) -->
+        <div id="payloadPanel" class="payload-panel" hidden>
+            <div class="payload-panel-header">
+                <span>SENT TO <b>POST https://api.bigdata.com/v1/search</b> &mdash; one filter-only request per topic (API key omitted)</span>
+                <button type="button" class="payload-copy" onclick="copyPayload()">COPY JSON</button>
+            </div>
+            <pre id="payloadJson" class="payload-json"></pre>
+        </div>
+
+        <!-- Topic Tabs Bar -->
+        <div id="topicTabsBar" class="topic-tabs-bar" style="display: none;">
+            <label class="topic-tabs-label">TOPICS:</label>
+            <div id="topicTabsList" class="topic-tabs-list"></div>
+        </div>
+
+        <!-- Chunk Table -->
+        <div class="main-content-wrapper">
+            <div class="news-container">
+                <div class="news-table-header">
+                    <div class="col-sector">SECTOR</div>
+                    <div class="col-topic">TOPIC</div>
+                    <div class="col-headline">HEADLINE</div>
+                    <div class="col-source">SOURCE</div>
+                    <div class="col-time">TIME</div>
+                </div>
+                <div id="newsFeed" class="news-feed">
+                    <div class="welcome-message">
+                        <div class="welcome-title">Location News Desk</div>
+                        <div class="welcome-text">
+                            Look up a place, add event topics, then GET NEWS
+                            <br><br>
+                            <strong>Filters only, no query text</strong> &mdash; each topic runs as its own search for
+                            chunks that mention the Knowledge Graph place <em>and</em> carry that event-taxonomy topic
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsOverlay" class="settings-overlay">
+        <div class="settings-box">
+            <h2 class="settings-title">
+                <svg class="settings-key-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M7 14a5 5 0 1 1 4.9-6H21v3h-2v2h-2v2h-3.1A5 5 0 0 1 7 14zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="currentColor"/>
+                </svg>
+                Bigdata API Key
+            </h2>
+            <p id="settingsApiKeyDescription" class="settings-description">
+                Enter your Bigdata API key to authenticate requests.
+            </p>
+            <div class="api-key-input-wrap">
+                <input type="password" id="settingsApiKey" placeholder="bd_v1_..." autocomplete="off">
+                <button type="button" class="eye-btn" onclick="toggleApiKeyVisibility()" aria-label="Show API key">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill="currentColor"/>
+                    </svg>
+                </button>
+            </div>
+            <p id="apiKeyStatus" class="api-key-status"></p>
+            <div class="settings-actions">
+                <button type="button" class="btn-close-settings" onclick="closeSettings()">Cancel</button>
+                <button type="button" class="btn-clear-key" onclick="clearApiKey()">Clear</button>
+                <button type="button" class="btn-save-key" onclick="saveApiKey()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/api-key.js?v=1.0"></script>
+    <script src="/static/location.js?v=1.0"></script>
+
+    <script>
+        // Header tooltip for app grid
+        document.addEventListener('DOMContentLoaded', function() {
+            const appGridIcon = document.getElementById('appGridIcon');
+            const appGridTooltip = document.getElementById('appGridTooltip');
+            if (!appGridIcon || !appGridTooltip) return;
+
+            appGridIcon.addEventListener('mouseenter', function() {
+                const rect = appGridIcon.getBoundingClientRect();
+                appGridTooltip.style.top = (rect.bottom + 5) + 'px';
+                appGridTooltip.style.left = (rect.left + rect.width / 2) + 'px';
+                appGridTooltip.style.transform = 'translateX(-50%)';
+                appGridTooltip.classList.add('show');
+            });
+
+            appGridIcon.addEventListener('mouseleave', function() {
+                appGridTooltip.classList.remove('show');
+            });
+        });
+    </script>
+</body>
+</html>

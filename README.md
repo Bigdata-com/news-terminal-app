@@ -17,6 +17,7 @@ Two terminals share the same backend and styling:
 |------|-------|--------|
 | `/` | Company desk — Topic News or Negative News | Entity-filtered topics, or filter-only negative taxonomy search |
 | `/sector` | Commodities desk — one theme, no ticker | Theme-only, no entity filter, phrases sent verbatim |
+| `/location` | Location desk — a Knowledge Graph place × event-taxonomy topics | Filter-only (`entity` + `topic`, no query text), one search per topic, one row per chunk |
 | `/how-it-works` | Docs | Plain-English flows + exact Bigdata search payloads for all three modes |
 
 The commodities page ships with four desks, each carrying 15 editable phrases and its own AI
@@ -28,6 +29,15 @@ query-expansion prompt:
 | Power | Wholesale power, capacity auctions, data centre load, rate cases, grid and generation capex |
 | Shipping & Freight | Dry bulk, tanker and container rates, chokepoints, fleet supply, decarbonisation rules, land and air freight |
 | Metals | Copper, iron ore and steel, precious and battery metals, mine supply, cost curves, resource nationalism |
+
+The location page looks the place up with `POST /v1/knowledge-graph/places` and each topic with
+`POST /v1/knowledge-graph/topics` (both proxied as `GET /api/places` and `GET /api/topics`), then
+`POST /api/location-news` runs one `/v1/search` per topic with `entity.any_of = [place]` and
+`topic.any_of = [topic]`. Bigdata.com applies those filters per document, so by default the desk keeps
+only chunks that themselves contain a detection of both (untick "Chunk must mention place + topic" to
+see every chunk). Place and topic mentions are highlighted in the expanded chunk, and the PAYLOAD
+button shows the exact request bodies. It opens on Chile × strike, protest, mine accident, supply
+chain disruption, force majeure and water shortage.
 
 Finance, Technology, and Insurance desks remain in the registry but are disabled (hidden from the UI).
 
@@ -67,11 +77,13 @@ news_terminal/
 ├── static/                 # Web UI assets
 │   ├── index.html          # Company terminal (/)
 │   ├── sector.html         # Sector terminal (/sector)
+│   ├── location.html       # Location terminal (/location)
 │   ├── how-it-works.html   # Docs page (/how-it-works)
 │   ├── style.css           # Shared styles for both terminals
 │   ├── api-key.js          # Client-only Bigdata API key + launch gate
 │   ├── app.js              # Company terminal logic
-│   └── sector.js           # Sector terminal logic
+│   ├── sector.js           # Sector terminal logic
+│   └── location.js         # Location terminal logic
 ├── docs/                   # Documentation
 ├── output/                 # Generated reports
 ├── pyproject.toml          # Dependencies

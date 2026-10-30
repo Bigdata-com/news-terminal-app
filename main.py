@@ -81,6 +81,25 @@ class SectorNewsRequest(BaseModel):
     query_reformulation: bool = Field(default=False, description="Enable AI query expansion")
 
 
+class LocationTopicItem(BaseModel):
+    """An event-taxonomy topic from the Knowledge Graph"""
+    id: str
+    name: str = ""
+
+
+class LocationNewsRequest(BaseModel):
+    """Request body for the location (place + taxonomy topic) chunk search endpoint"""
+    place_id: str = Field(..., description="Knowledge Graph place entity ID, e.g. '47A64D' (Chile)")
+    topics: List[LocationTopicItem] = Field(..., description="Event-taxonomy topics; one search per topic")
+    days: int = Field(default=7, description="Number of days to look back")
+    max_chunks: Optional[int] = Field(
+        default=None, ge=1, le=500, description="Chunks per topic query; omit to split the shared budget"
+    )
+    strict: bool = Field(
+        default=True, description="Keep only chunks that themselves mention the place and the topic"
+    )
+
+
 class NewsMultiSearchRequest(BaseModel):
     """Request body for multi-ticker news search endpoint"""
     tickers: List[str] = Field(..., description="List of ticker symbols")
@@ -177,7 +196,29 @@ def require_bigdata_api_key(
     return key
 
 
+@app.middleware("http")
+async def report_rejected_api_key(request: Request, call_next):
+    """
+    Turn a key that Bigdata.com rejected into a 401 for the browser.
+
+    Search methods return empty results on HTTP errors, which would otherwise show up as
+    "no news found". The web UI opens the API key dialog on any 401.
+    """
+    response = await call_next(request)
+    service = getattr(request.state, "topic_search_service", None)
+    if getattr(service, "auth_rejected", False):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": "API key rejected",
+                "message": "Bigdata.com rejected this API key (authentication failed). Check the key and save it again.",
+            },
+        )
+    return response
+
+
 async def get_topic_search_service(
+    request: Request,
     api_key: str = Depends(require_bigdata_api_key),
 ) -> AsyncIterator[TopicSearchService]:
     """Build a TopicSearchService for this request using the caller's key."""
@@ -187,6 +228,7 @@ async def get_topic_search_service(
         rate_limiter=shared_rate_limiter,
         company_cache=shared_company_cache,
     )
+    request.state.topic_search_service = service
     try:
         yield service
     finally:
@@ -423,6 +465,12 @@ async def home():
 async def sector_page():
     """Serve the sector terminal interface"""
     return serve_static_page("sector.html")
+
+
+@app.get("/location", response_class=HTMLResponse)
+async def location_page():
+    """Serve the location (place + event topic) terminal interface"""
+    return serve_static_page("location.html")
 
 
 @app.get("/how-it-works", response_class=HTMLResponse)
@@ -897,6 +945,91 @@ async def get_sector_news(
     except Exception as e:
         logger.error(f"Error processing sector request for {sector['id']}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/places")
+async def lookup_places(
+    q: str,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
+):
+    """Look up places (countries, regions, cities, landmarks) in the Knowledge Graph"""
+    q = q.strip()
+    if len(q) < 2:
+        return {"results": []}
+    places = await topic_search_service.lookup_knowledge_graph("places", q)
+    return {"results": [
+        {
+            "id": p.get("id"),
+            "name": p.get("name"),
+            "type": p.get("type"),
+            "category": p.get("category"),
+            "region": p.get("region"),
+            "country": p.get("country"),
+            "description": p.get("description", ""),
+        }
+        for p in places[:12]
+    ]}
+
+
+@app.get("/api/topics")
+async def lookup_topics(
+    q: str,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
+):
+    """Look up event-taxonomy topics in the Knowledge Graph (POST /v1/knowledge-graph/topics)"""
+    q = q.strip()
+    if len(q) < 2:
+        return {"results": []}
+    topics = await topic_search_service.lookup_knowledge_graph("topics", q)
+    return {"results": [
+        {
+            "id": t.get("id"),
+            "name": t.get("name"),
+            "description": t.get("description", ""),
+            "topic": t.get("topic"),
+            "group": t.get("group"),
+        }
+        for t in topics[:15]
+    ]}
+
+
+@app.post("/api/location-news")
+async def get_location_news(
+    request: LocationNewsRequest,
+    topic_search_service: TopicSearchService = Depends(get_topic_search_service),
+):
+    """
+    Get chunks that mention a place AND carry an event-taxonomy topic.
+
+    Runs one filter-only search per topic (entity any_of [place_id] + topic any_of [topic_id],
+    no query text) and returns every chunk as its own row, with the request bodies sent.
+    """
+    place_id = request.place_id.strip()
+    topics = [{"id": t.id.strip(), "name": t.name.strip()} for t in request.topics if t.id.strip()]
+    if not place_id:
+        raise HTTPException(status_code=400, detail="Pick a location first")
+    if not topics:
+        raise HTTPException(status_code=400, detail="Add at least one topic")
+
+    logger.info(f"API request for location news: {place_id} ({request.days} days, {len(topics)} topics)")
+
+    try:
+        results = await topic_search_service.search_location(
+            place_id, topics, days=request.days, max_chunks=request.max_chunks, strict=request.strict
+        )
+        return {
+            **results,
+            "settings": {
+                "days": request.days,
+                "topic_count": len(topics),
+                "max_chunks": request.max_chunks,
+                "strict": request.strict,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error processing location request for {place_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.get("/api/search/{query}")
 async def search_news(

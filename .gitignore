@@ -80,3 +80,6 @@ dmypy.json
 *credentials*.json
 service-account*.json
 
+
+# Local dependency lock (never committed)
+**/uv.lock

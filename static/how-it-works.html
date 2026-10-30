@@ -172,6 +172,7 @@
                     <nav class="terminal-nav">
                         <a href="/" class="terminal-nav-link">Companies</a>
                         <a href="/sector" class="terminal-nav-link">Commodities</a>
+                        <a href="/location" class="terminal-nav-link">Location</a>
                         <a href="/how-it-works" class="terminal-nav-link active">How it works</a>
                     </nav>
                 </div>
@@ -185,7 +186,7 @@
     <main class="how-page">
         <h1>How it works</h1>
         <p class="lede">
-            Three search modes share the same Bigdata.com <code class="inline">POST /v1/search</code> endpoint
+            Four search modes share the same Bigdata.com <code class="inline">POST /v1/search</code> endpoint
             but ask for very different things. This page shows the plain-English flow and the exact payload shape
             for each mode.
         </p>
@@ -194,6 +195,7 @@
             <a href="#topic-news">Company Topic News</a>
             <a href="#negative-news">Company Negative News</a>
             <a href="#sector-news">Sector / Commodity News</a>
+            <a href="#location-news">Location News</a>
             <a href="#compare">Quick compare</a>
         </nav>
 
@@ -313,6 +315,45 @@
 }</pre></div>
         </section>
 
+        <section class="how-section" id="location-news">
+            <h2>4. Location News</h2>
+            <p class="how-meta">UI: /location · API: GET /api/places, GET /api/topics, POST /api/location-news</p>
+            <p>
+                Location desk: pick a <strong>place</strong> (country, region or city) and one or more
+                <strong>event topics</strong>, both looked up in the Bigdata Knowledge Graph. The feed shows
+                <strong>chunks</strong> (passages), not whole articles, that mention that place and carry that event.
+            </p>
+            <ul>
+                <li>Place lookup: <code class="inline">POST /v1/knowledge-graph/places</code> with <code class="inline">{"query": "Chile"}</code> returns entity IDs (Chile = <code class="inline">47A64D</code>)</li>
+                <li>Topic lookup: <code class="inline">POST /v1/knowledge-graph/topics</code> with <code class="inline">{"query": "strike"}</code> returns taxonomy IDs such as <code class="inline">business,labor-issues,workers-strike,,</code></li>
+                <li>Filter-only search — <strong>no query text</strong>, reranker off</li>
+                <li>Place in <code class="inline">entity.any_of</code>, one taxonomy topic in <code class="inline">topic.any_of</code> per request</li>
+                <li>Sources: public news and transcripts; no sentiment filter (each chunk's score is shown)</li>
+                <li>One row per chunk, deduplicated by document ID + chunk number; SECTOR is the taxonomy's top level (Business, Society, Environment…)</li>
+                <li>Bigdata applies filters per document, so other chunks of a matching article come back too.
+                    <strong>Chunk must mention place + topic</strong> (on by default) keeps only chunks whose own detections
+                    include both, and the expanded row highlights them</li>
+                <li>Chunk budget is split across topics unless CHUNKS / TOPIC is set (max 500); PAYLOAD shows the exact bodies sent</li>
+            </ul>
+            <p>Search payload (one call per topic):</p>
+            <div class="payload-block"><pre>{
+  "search_mode": "fast",
+  "query": {
+    "filters": {
+      "timestamp": { "start": "...", "end": "..." },
+      "category": {
+        "mode": "INCLUDE",
+        "values": ["news_public", "transcripts"]
+      },
+      "entity": { "any_of": ["47A64D"] },
+      "topic": { "any_of": ["business,labor-issues,workers-strike,,"] }
+    },
+    "max_chunks": 50,
+    "ranking_params": { "reranker": { "enabled": false } }
+  }
+}</pre></div>
+        </section>
+
         <section class="how-section" id="compare">
             <h2>Quick compare</h2>
             <table class="compare-table">
@@ -322,6 +363,7 @@
                         <th>Topic News</th>
                         <th>Negative News</th>
                         <th>Sector / Commodity</th>
+                        <th>Location</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -330,39 +372,53 @@
                         <td><code class="inline">/</code></td>
                         <td><code class="inline">/</code></td>
                         <td><code class="inline">/sector</code></td>
+                        <td><code class="inline">/location</code></td>
                     </tr>
                     <tr>
                         <td>API</td>
                         <td><code class="inline">POST /api/news/{ticker}</code></td>
                         <td><code class="inline">POST /api/news/{ticker}</code><br>negative_news: true</td>
                         <td><code class="inline">POST /api/sector-news</code></td>
+                        <td><code class="inline">POST /api/location-news</code></td>
                     </tr>
                     <tr>
                         <td>Query text</td>
                         <td>Yes — topic with company name</td>
                         <td>No — filters only</td>
                         <td>Yes — theme phrase verbatim</td>
+                        <td>No — filters only</td>
                     </tr>
                     <tr>
                         <td>Entity</td>
                         <td><code class="inline">all_of</code> company</td>
                         <td>Headline <code class="inline">any_of</code> (1 ID)</td>
                         <td>None</td>
+                        <td><code class="inline">any_of</code> place (Knowledge Graph)</td>
                     </tr>
                     <tr>
                         <td>Taxonomy topics</td>
                         <td>No</td>
                         <td>Yes — risk categories</td>
                         <td>No</td>
+                        <td>Yes — one per request</td>
                     </tr>
                     <tr>
                         <td>Sentiment</td>
                         <td>positive + negative</td>
                         <td>range −1 … −0.1</td>
                         <td>positive + negative</td>
+                        <td>none (score shown per chunk)</td>
+                    </tr>
+                    <tr>
+                        <td>Result row</td>
+                        <td>Article (best chunk)</td>
+                        <td>Article (best chunk)</td>
+                        <td>Article (best chunk)</td>
+                        <td>Chunk</td>
                     </tr>
                     <tr>
                         <td>Sources</td>
+                        <td>news_public, transcripts</td>
                         <td>news_public, transcripts</td>
                         <td>news_public, transcripts</td>
                         <td>news_public, transcripts</td>

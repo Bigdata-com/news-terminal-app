@@ -14,6 +14,8 @@ KEY PUBLIC METHODS:
     search_single_topic(): Single topic search with sentiment filter
     search_sector(): Theme-based search for a sector (parallel topics, no entity filter)
     search_single_theme(): Single theme search with no entity filter
+    search_location(): Place entity + event-taxonomy topic searches, one row per chunk
+    lookup_knowledge_graph(): Look up Knowledge Graph places or taxonomy topics by name
     get_company_data(): Resolve ticker to entity ID via Knowledge Graph API
     generate_topic_variations(): Generate 3 query variations using Gemini AI
     generate_theme_variations(): Generate 3 sector query variations using a per-sector prompt
@@ -118,6 +120,9 @@ class TopicSearchService:
         self.rate_limiter = rate_limiter or RateLimiter(max_tokens=200, refill_period=60)
         self.company_cache = company_cache or CompanyDataCache(ttl_hours=24)
         self._session: Optional[aiohttp.ClientSession] = None
+        # Set when Bigdata.com rejects the key (401/403). Search methods swallow HTTP errors
+        # and return empty lists, so the API layer checks this to report the real cause.
+        self.auth_rejected = False
         
         # Initialize Gemini service for query reformulation (lazy init)
         self._gemini_service = gemini_service
@@ -130,8 +135,15 @@ class TopicSearchService:
         Reuses connection pool for much better performance.
         """
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            trace = aiohttp.TraceConfig()
+            trace.on_request_end.append(self._on_request_end)
+            self._session = aiohttp.ClientSession(trace_configs=[trace])
         return self._session
+
+    async def _on_request_end(self, _session, _ctx, params) -> None:
+        """Flag a rejected API key on any Bigdata.com call made through the shared session."""
+        if params.response.status in (401, 403):
+            self.auth_rejected = True
     
     def _get_gemini_service(self) -> GeminiService:
         """
@@ -1632,3 +1644,228 @@ Return exactly 3 variations, each as a complete search query."""
             },
         }
 
+
+    # ------------------------------------------------------------------
+    # LOCATION SEARCH (place entity + event taxonomy topic, chunk level)
+    # ------------------------------------------------------------------
+
+    async def lookup_knowledge_graph(self, kind: str, query: str) -> List[Dict]:
+        """
+        Look up Knowledge Graph places or event-taxonomy topics by name.
+
+        Args:
+            kind: ``"places"`` or ``"topics"``
+            query: Free-text name, e.g. "Chile" or "strike"
+
+        Returns:
+            Raw ``results`` list from the Knowledge Graph API, or an empty list on error
+        """
+        await self.rate_limiter.acquire()
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/knowledge-graph/{kind}",
+                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                json={"query": query},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("results", [])
+                logger.warning(
+                    f"Knowledge Graph {kind} lookup error for '{query}': "
+                    f"{response.status} - {await response.text()}"
+                )
+                return []
+        except Exception as e:
+            logger.warning(f"Knowledge Graph {kind} lookup failed for '{query}': {e}")
+            return []
+
+    @staticmethod
+    def build_location_payload(
+        place_id: str,
+        topic_id: str,
+        start: str,
+        end: str,
+        max_chunks: int,
+    ) -> Dict:
+        """
+        Build a filter-only /search body: place entity AND one event-taxonomy topic.
+
+        There is no query text. Bigdata.com applies these filters per document, so other
+        chunks of a matching document come back too (see ``strict`` in :meth:`search_location`).
+        The reranker is off because there is nothing to rerank against.
+        """
+        return {
+            "search_mode": "fast",
+            "query": {
+                "filters": {
+                    "timestamp": {"start": start, "end": end},
+                    "category": {"mode": "INCLUDE", "values": SEARCH_SOURCE_CATEGORIES},
+                    "entity": {"any_of": [place_id]},
+                    "topic": {"any_of": [topic_id]},
+                },
+                "max_chunks": max_chunks,
+                "ranking_params": {"reranker": {"enabled": False}},
+            },
+        }
+
+    @staticmethod
+    def _spans(detections: List[Dict], ids: set) -> List[List[int]]:
+        """Return sorted, non-overlapping [start, end] spans of detections whose id is in ``ids``."""
+        spans = sorted(
+            [d.get("start", 0), d.get("end", 0)]
+            for d in detections or []
+            if d.get("id") in ids and d.get("end", 0) > d.get("start", 0)
+        )
+        merged: List[List[int]] = []
+        for start, end in spans:
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        return merged
+
+    async def search_location_topic(
+        self,
+        place_id: str,
+        topic: Dict,
+        topic_index: int,
+        days: float,
+        max_chunks: int,
+    ) -> Tuple[Dict, List[Dict]]:
+        """
+        Run one place + topic search and return ``(payload, chunk_rows)``.
+
+        Unlike the theme searches, results are NOT collapsed per document: every chunk
+        the API returns becomes its own row, because the chunk is the evidence.
+        """
+        topic_id = topic["id"]
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+        payload = self.build_location_payload(
+            place_id,
+            topic_id,
+            self._format_timestamp(start_time),
+            self._format_timestamp(end_time),
+            max_chunks,
+        )
+
+        await self.rate_limiter.acquire()
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/search",
+                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status != 200:
+                    if response.status != 404:
+                        logger.warning(
+                            f"Location search error ({place_id} / {topic_id}): "
+                            f"{response.status} - {await response.text()}"
+                        )
+                    return payload, []
+                data = await response.json()
+        except Exception as e:
+            logger.warning(f"Location search failed ({place_id} / {topic_id}): {e}")
+            return payload, []
+
+        rows = []
+        for article in data.get("results", []):
+            timestamp = article.get("timestamp", "")
+            for chunk in article.get("chunks", []):
+                detections = chunk.get("detections", [])
+                rows.append({
+                    "id": f"{article.get('id')}:{chunk.get('cnum')}",
+                    "document_id": article.get("id"),
+                    "cnum": chunk.get("cnum"),
+                    "headline": article.get("headline", "No headline"),
+                    "timestamp": timestamp,
+                    "time_ago": self._get_time_ago(timestamp),
+                    "source": article.get("source", {}).get("name", "Unknown"),
+                    "document_url": article.get("url"),
+                    "document_type": article.get("document_type", "NEWS"),
+                    "full_text": chunk.get("text", ""),
+                    "relevance": chunk.get("relevance", 0),
+                    "sentiment": chunk.get("sentiment"),
+                    "search_type": "location",
+                    "topic_id": topic_id,
+                    "topic_name": topic.get("name") or topic_id,
+                    "topic_index": topic_index,
+                    "sector": topic_id.split(",")[0],
+                    "place_spans": self._spans(detections, {place_id}),
+                    "topic_spans": self._spans(detections, {topic_id}),
+                })
+        return payload, rows
+
+    async def search_location(
+        self,
+        place_id: str,
+        topics: List[Dict],
+        days: float = 7,
+        max_chunks: Optional[int] = None,
+        strict: bool = True,
+    ) -> Dict:
+        """
+        Search one place against several event-taxonomy topics in parallel, chunk level.
+
+        Args:
+            place_id: Knowledge Graph place entity ID (e.g. ``47A64D`` for Chile)
+            topics: ``[{id, name}]`` taxonomy topics from the Knowledge Graph
+            days: Number of days to look back
+            max_chunks: Chunks per topic query; defaults to the shared budget split across topics
+            strict: Keep only chunks that themselves contain a detection of the place AND the
+                topic. The API applies filters per document, so other chunks of a matching
+                document come back too.
+
+        Returns:
+            Chunk rows (one per document chunk, deduplicated by document + chunk number),
+            the request bodies sent, and search stats
+        """
+        start_time = datetime.now()
+        chunks_per_query = max_chunks or max(1, TOTAL_CHUNK_BUDGET // max(1, len(topics)))
+        logger.info(
+            f"Starting LOCATION search for {place_id} "
+            f"({len(topics)} topics x {chunks_per_query} chunks, {days} days)"
+        )
+
+        results = await asyncio.gather(*[
+            self.search_location_topic(place_id, topic, i, days, chunks_per_query)
+            for i, topic in enumerate(topics)
+        ])
+
+        # A chunk can carry several of the selected topics; keep its first topic match
+        chunks: Dict[str, Dict] = {}
+        for _payload, rows in results:
+            for row in rows:
+                chunks.setdefault(row["id"], row)
+
+        rows = list(chunks.values())
+        returned = len(rows)
+        if strict:
+            rows = [r for r in rows if r["place_spans"] and r["topic_spans"]]
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Completed location search for {place_id}: {len(rows)} chunks in {elapsed:.2f}s")
+
+        return {
+            "place_id": place_id,
+            "chunk_results": rows,
+            "total_results": len(rows),
+            "documents": len({r["document_id"] for r in rows}),
+            "requests": [payload for payload, _rows in results],
+            "search_stats": {
+                "topics_searched": len(topics),
+                "queries_executed": len(topics),
+                "strict": strict,
+                "chunks_returned": returned,
+                "chunks_dropped": returned - len(rows),
+                "chunks_per_query": chunks_per_query,
+                "chunks_by_topic": {t["id"]: sum(1 for r in rows if r["topic_id"] == t["id"]) for t in topics},
+                "elapsed_seconds": round(elapsed, 2),
+                "rate_limiter_stats": self.rate_limiter.get_metrics(),
+            },
+        }
