@@ -3,22 +3,28 @@ const LOCATION_STORAGE_KEY = 'locationTerminalSettings';
 const LOCATION_FETCH_TIMEOUT_MS = 120000;
 const LOOKUP_DEBOUNCE_MS = 300;
 
-// Demo defaults: copper and lithium supply risk in Chile
-const DEFAULT_PLACE = { id: '47A64D', name: 'Chile', type: 'Country', country: 'CL' };
+// Demo defaults: data center campus build-out and pushback in Texas.
+// Taxonomy from the data center lenses (construction, community opposition, regulation).
+// Bump DEFAULTS_REVISION when these change so browsers holding the old defaults pick them up.
+const DEFAULTS_REVISION = 5;
+const DEFAULT_PLACE = { id: 'C1BA53', name: 'State of Texas', type: 'Region', country: 'US' };
 const DEFAULT_TOPICS = [
-    { id: 'business,labor-issues,workers-strike,,', name: 'Strike' },
+    { id: 'business,assets,facility-construction,,', name: 'Facility Construction' },
     { id: 'society,civil-unrest,protest,,', name: 'Protest' },
-    { id: 'business,industrial-accidents,mine-accident,,', name: 'Mine Accident' },
-    { id: 'business,products-services,supply-chain-disruption,,', name: 'Supply Chain Disruption' },
-    { id: 'business,industrial-accidents,force-majeure,,', name: 'Force Majeure' },
-    { id: 'environment,natural-disasters,water-shortage,,', name: 'Water Shortage' }
+    { id: 'society,civil-unrest,civil-unrest,,', name: 'Civil Unrest' },
+    { id: 'society,legal,legal-issues,,', name: 'Legal Issues' },
+    { id: 'business,regulatory,regulatory-investigation,,', name: 'Regulatory Investigation' }
 ];
+const DEFAULT_DAYS = 90;
+const DEFAULT_TEXT = 'Data Center';
 
 // Persisted user settings
 let locationSettings = {
+    defaultsRevision: DEFAULTS_REVISION,
     place: null,
     topics: [],
-    days: 7,
+    days: DEFAULT_DAYS,
+    text: DEFAULT_TEXT,
     strict: true,
     maxChunks: null
 };
@@ -147,17 +153,24 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 function loadSettings() {
+    let storedRevision = null;
     try {
         const stored = JSON.parse(localStorage.getItem(LOCATION_STORAGE_KEY) || 'null');
         if (stored && typeof stored === 'object') {
             locationSettings = { ...locationSettings, ...stored };
+            storedRevision = stored.defaultsRevision ?? null;
         }
     } catch (error) {
         console.warn('Could not read location settings:', error);
     }
-    if (!locationSettings.place && (!locationSettings.topics || locationSettings.topics.length === 0)) {
+    const emptyDesk = !locationSettings.place && (!locationSettings.topics || locationSettings.topics.length === 0);
+    if (emptyDesk || storedRevision !== DEFAULTS_REVISION) {
         locationSettings.place = { ...DEFAULT_PLACE };
         locationSettings.topics = DEFAULT_TOPICS.map(t => ({ ...t }));
+        locationSettings.days = DEFAULT_DAYS;
+        locationSettings.text = DEFAULT_TEXT;
+        locationSettings.defaultsRevision = DEFAULTS_REVISION;
+        saveSettingsToStorage();
     }
     locationSettings.topics = locationSettings.topics || [];
 }
@@ -185,6 +198,17 @@ function initializeFilters() {
             this.classList.add('active');
             saveSettingsToStorage();
         });
+    });
+
+    const queryTextInput = document.getElementById('queryTextInput');
+    queryTextInput.value = locationSettings.text || '';
+    queryTextInput.addEventListener('input', function() {
+        locationSettings.text = this.value;
+        saveSettingsToStorage();
+        updateDeskLabel();
+    });
+    queryTextInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') getLocationNews();
     });
 
     const strictToggle = document.getElementById('strictToggle');
@@ -327,9 +351,16 @@ function renderPicked() {
             <button type="button" onclick="removeTopic(${i})" aria-label="Remove ${escapeHtml(t.name || t.id)}">&times;</button>
         </span>`).join('');
 
+    updateDeskLabel();
+}
+
+function updateDeskLabel() {
+    const place = locationSettings.place;
+    const text = (locationSettings.text || '').trim();
     const label = document.getElementById('activeLocationLabel');
     label.textContent = place
         ? `${place.name} × ${locationSettings.topics.length} topic${locationSettings.topics.length === 1 ? '' : 's'}`
+            + (text ? ` × “${text}”` : '')
         : 'No location selected';
 }
 
@@ -355,7 +386,8 @@ async function getLocationNews() {
             place_id: place.id,
             topics: locationSettings.topics,
             days: locationSettings.days,
-            strict: locationSettings.strict !== false
+            strict: locationSettings.strict !== false,
+            text: (locationSettings.text || '').trim()
         };
         if (locationSettings.maxChunks) {
             requestBody.max_chunks = locationSettings.maxChunks;

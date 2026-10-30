@@ -2473,3 +2473,9 @@ button:focus,
 .news-item.expanded .news-summary {
     user-select: text;
 }
+
+.query-text-hint {
+    color: #6e7681;
+    font-size: 10px;
+    white-space: nowrap;
+}

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=location-1">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -129,7 +129,7 @@
             <label for="placeInput">LOCATION:</label>
             <div id="placePicked" class="picked-list"></div>
             <div class="lookup">
-                <input type="text" id="placeInput" class="lookup-input" placeholder="Look up a country, region or city, e.g. Chile" autocomplete="off">
+                <input type="text" id="placeInput" class="lookup-input" placeholder="Look up a country, state or city, e.g. Texas, Austin" autocomplete="off">
                 <div id="placeResults" class="lookup-results" hidden></div>
             </div>
         </div>
@@ -139,9 +139,18 @@
             <label for="topicInput">TOPICS:</label>
             <div id="topicPicked" class="picked-list"></div>
             <div class="lookup">
-                <input type="text" id="topicInput" class="lookup-input" placeholder="Add an event topic, e.g. strike, protest, mine accident" autocomplete="off">
+                <input type="text" id="topicInput" class="lookup-input" placeholder="Add an event topic, e.g. facility construction, protest, legal issues" autocomplete="off">
                 <div id="topicResults" class="lookup-results" hidden></div>
             </div>
+        </div>
+
+        <!-- Optional query text (sent as query.text and as a keyword filter) -->
+        <div class="input-bar lookup-bar">
+            <label for="queryTextInput">TEXT:</label>
+            <div class="lookup">
+                <input type="text" id="queryTextInput" class="lookup-input" placeholder="Optional, e.g. Data Center. Leave empty for filters only" autocomplete="off">
+            </div>
+            <span class="query-text-hint">Optional · ranks chunks and must appear in them (keyword filter)</span>
         </div>
 
         <!-- Action Bar -->
@@ -160,9 +169,9 @@
                 <label class="filter-label">RANGE:</label>
                 <div class="date-filter-buttons">
                     <button class="date-btn" data-days="1">1D</button>
-                    <button class="date-btn active" data-days="7">1W</button>
+                    <button class="date-btn" data-days="7">1W</button>
                     <button class="date-btn" data-days="30">1M</button>
-                    <button class="date-btn" data-days="90">3M</button>
+                    <button class="date-btn active" data-days="90">3M</button>
                     <button class="date-btn" data-days="180">6M</button>
                     <button class="date-btn" data-days="365">1Y</button>
                 </div>
@@ -222,8 +231,9 @@
                         <div class="welcome-text">
                             Look up a place, add event topics, then GET NEWS
                             <br><br>
-                            <strong>Filters only, no query text</strong> &mdash; each topic runs as its own search for
-                            chunks that mention the Knowledge Graph place <em>and</em> carry that event-taxonomy topic
+                            Each topic runs as its own search for chunks that mention the Knowledge Graph place
+                            <em>and</em> carry that event-taxonomy topic. Optional <strong>TEXT</strong> (default
+                            &ldquo;Data Center&rdquo;) keeps the feed on one subject; clear it for filters only
                         </div>
                     </div>
                 </div>
@@ -260,7 +270,7 @@
     </div>
 
     <script src="/static/api-key.js?v=1.0"></script>
-    <script src="/static/location.js?v=1.0"></script>
+    <script src="/static/location.js?v=1.6"></script>
 
     <script>
         // Header tooltip for app grid

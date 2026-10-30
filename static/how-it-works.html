@@ -324,10 +324,13 @@
                 <strong>chunks</strong> (passages), not whole articles, that mention that place and carry that event.
             </p>
             <ul>
-                <li>Place lookup: <code class="inline">POST /v1/knowledge-graph/places</code> with <code class="inline">{"query": "Chile"}</code> returns entity IDs (Chile = <code class="inline">47A64D</code>)</li>
-                <li>Topic lookup: <code class="inline">POST /v1/knowledge-graph/topics</code> with <code class="inline">{"query": "strike"}</code> returns taxonomy IDs such as <code class="inline">business,labor-issues,workers-strike,,</code></li>
-                <li>Filter-only search — <strong>no query text</strong>, reranker off</li>
+                <li>Place lookup: <code class="inline">POST /v1/knowledge-graph/places</code> with <code class="inline">{"query": "Texas"}</code> returns entity IDs (State of Texas = <code class="inline">C1BA53</code>, not Texas City or Texas County, Missouri)</li>
+                <li>Topic lookup: <code class="inline">POST /v1/knowledge-graph/topics</code> with <code class="inline">{"query": "protest"}</code> returns taxonomy IDs such as <code class="inline">society,civil-unrest,protest,,</code></li>
                 <li>Place in <code class="inline">entity.any_of</code>, one taxonomy topic in <code class="inline">topic.any_of</code> per request</li>
+                <li>Optional <strong>TEXT</strong> box (default <code class="inline">Data Center</code>): sent as <code class="inline">query.text</code> to rank chunks
+                    <em>and</em> as <code class="inline">keyword.any_of</code> so every result mentions it (case, plural and "centre" variants match).
+                    Clear it for a filter-only search</li>
+                <li>Reranker off (with a topic filter it drops results)</li>
                 <li>Sources: public news and transcripts; no sentiment filter (each chunk's score is shown)</li>
                 <li>One row per chunk, deduplicated by document ID + chunk number; SECTOR is the taxonomy's top level (Business, Society, Environment…)</li>
                 <li>Bigdata applies filters per document, so other chunks of a matching article come back too.
@@ -335,18 +338,31 @@
                     include both, and the expanded row highlights them</li>
                 <li>Chunk budget is split across topics unless CHUNKS / TOPIC is set (max 500); PAYLOAD shows the exact bodies sent</li>
             </ul>
-            <p>Search payload (one call per topic):</p>
+            <p>
+                Example: Texas (the desk's default) × TEXT <code class="inline">Data Center</code> × the data center campus taxonomy: build-out
+                (<code class="inline">business,assets,facility-construction,,</code>), community opposition
+                (<code class="inline">society,civil-unrest,protest,,</code>, <code class="inline">society,civil-unrest,civil-unrest,,</code>,
+                <code class="inline">society,legal,legal-issues,,</code>) and regulation
+                (<code class="inline">business,regulatory,regulatory-investigation,,</code>). Topic filters find the event, not the industry:
+                without TEXT, one month of Texas returns about 220 chunks but only 14 about data centers (the Protest feed
+                is every protest that mentions Texas). With <code class="inline">Data Center</code>, three months returns 114 chunks, all of
+                them on data centers, e.g. Regulatory Investigation → <em>"Abbott Orders Temporary Halt For All Data Center Permits In Texas"</em>
+                and Protest → <em>"US Data Center New Construction Bans Surge in July, Protests Erupt in 142 Cities"</em>.
+            </p>
+            <p>Search payload (one call per topic, Protest shown; drop <code class="inline">text</code> and <code class="inline">keyword</code> when TEXT is empty):</p>
             <div class="payload-block"><pre>{
   "search_mode": "fast",
   "query": {
+    "text": "Data Center",
     "filters": {
       "timestamp": { "start": "...", "end": "..." },
       "category": {
         "mode": "INCLUDE",
         "values": ["news_public", "transcripts"]
       },
-      "entity": { "any_of": ["47A64D"] },
-      "topic": { "any_of": ["business,labor-issues,workers-strike,,"] }
+      "entity": { "any_of": ["C1BA53"] },
+      "topic": { "any_of": ["society,civil-unrest,protest,,"] },
+      "keyword": { "any_of": ["Data Center"] }
     },
     "max_chunks": 50,
     "ranking_params": { "reranker": { "enabled": false } }
@@ -386,7 +402,7 @@
                         <td>Yes — topic with company name</td>
                         <td>No — filters only</td>
                         <td>Yes — theme phrase verbatim</td>
-                        <td>No — filters only</td>
+                        <td>Optional — default "Data Center", also a keyword filter</td>
                     </tr>
                     <tr>
                         <td>Entity</td>

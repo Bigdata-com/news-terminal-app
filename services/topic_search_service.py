@@ -1689,23 +1689,33 @@ Return exactly 3 variations, each as a complete search query."""
         start: str,
         end: str,
         max_chunks: int,
+        text: str = "",
     ) -> Dict:
         """
-        Build a filter-only /search body: place entity AND one event-taxonomy topic.
+        Build a /search body: place entity AND one event-taxonomy topic, plus optional query text.
 
-        There is no query text. Bigdata.com applies these filters per document, so other
-        chunks of a matching document come back too (see ``strict`` in :meth:`search_location`).
-        The reranker is off because there is nothing to rerank against.
+        Without text the search is filter-only. Text (e.g. "Data Center") is sent twice: as
+        ``query.text`` to rank chunks by similarity, and as a ``keyword`` filter so every result
+        actually mentions it (the API matches case, plural and spelling variants such as "centre").
+        Bigdata.com applies the filters per document, so other chunks of a matching document come
+        back too (see ``strict`` in :meth:`search_location`). The reranker stays off: combined with
+        a topic filter it drops results.
         """
+        filters: Dict = {
+            "timestamp": {"start": start, "end": end},
+            "category": {"mode": "INCLUDE", "values": SEARCH_SOURCE_CATEGORIES},
+            "entity": {"any_of": [place_id]},
+            "topic": {"any_of": [topic_id]},
+        }
+        query: Dict = {}
+        if text:
+            query["text"] = text
+            filters["keyword"] = {"any_of": [text]}
         return {
             "search_mode": "fast",
             "query": {
-                "filters": {
-                    "timestamp": {"start": start, "end": end},
-                    "category": {"mode": "INCLUDE", "values": SEARCH_SOURCE_CATEGORIES},
-                    "entity": {"any_of": [place_id]},
-                    "topic": {"any_of": [topic_id]},
-                },
+                **query,
+                "filters": filters,
                 "max_chunks": max_chunks,
                 "ranking_params": {"reranker": {"enabled": False}},
             },
@@ -1734,6 +1744,7 @@ Return exactly 3 variations, each as a complete search query."""
         topic_index: int,
         days: float,
         max_chunks: int,
+        text: str = "",
     ) -> Tuple[Dict, List[Dict]]:
         """
         Run one place + topic search and return ``(payload, chunk_rows)``.
@@ -1750,6 +1761,7 @@ Return exactly 3 variations, each as a complete search query."""
             self._format_timestamp(start_time),
             self._format_timestamp(end_time),
             max_chunks,
+            text,
         )
 
         await self.rate_limiter.acquire()
@@ -1809,6 +1821,7 @@ Return exactly 3 variations, each as a complete search query."""
         days: float = 7,
         max_chunks: Optional[int] = None,
         strict: bool = True,
+        text: str = "",
     ) -> Dict:
         """
         Search one place against several event-taxonomy topics in parallel, chunk level.
@@ -1818,6 +1831,7 @@ Return exactly 3 variations, each as a complete search query."""
             topics: ``[{id, name}]`` taxonomy topics from the Knowledge Graph
             days: Number of days to look back
             max_chunks: Chunks per topic query; defaults to the shared budget split across topics
+            text: Optional query text, also applied as a keyword filter (empty = filters only)
             strict: Keep only chunks that themselves contain a detection of the place AND the
                 topic. The API applies filters per document, so other chunks of a matching
                 document come back too.
@@ -1834,7 +1848,7 @@ Return exactly 3 variations, each as a complete search query."""
         )
 
         results = await asyncio.gather(*[
-            self.search_location_topic(place_id, topic, i, days, chunks_per_query)
+            self.search_location_topic(place_id, topic, i, days, chunks_per_query, text)
             for i, topic in enumerate(topics)
         ])
 
@@ -1853,6 +1867,7 @@ Return exactly 3 variations, each as a complete search query."""
 
         return {
             "place_id": place_id,
+            "text": text,
             "chunk_results": rows,
             "total_results": len(rows),
             "documents": len({r["document_id"] for r in rows}),

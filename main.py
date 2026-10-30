@@ -98,6 +98,10 @@ class LocationNewsRequest(BaseModel):
     strict: bool = Field(
         default=True, description="Keep only chunks that themselves mention the place and the topic"
     )
+    text: str = Field(
+        default="",
+        description="Optional query text, e.g. 'Data Center', also applied as a keyword filter; empty = filters only",
+    )
 
 
 class NewsMultiSearchRequest(BaseModel):
@@ -1000,8 +1004,9 @@ async def get_location_news(
     """
     Get chunks that mention a place AND carry an event-taxonomy topic.
 
-    Runs one filter-only search per topic (entity any_of [place_id] + topic any_of [topic_id],
-    no query text) and returns every chunk as its own row, with the request bodies sent.
+    Runs one search per topic (entity any_of [place_id] + topic any_of [topic_id], plus the optional
+    query text as text and keyword filter) and returns every chunk as its own row, with the request
+    bodies sent.
     """
     place_id = request.place_id.strip()
     topics = [{"id": t.id.strip(), "name": t.name.strip()} for t in request.topics if t.id.strip()]
@@ -1014,7 +1019,12 @@ async def get_location_news(
 
     try:
         results = await topic_search_service.search_location(
-            place_id, topics, days=request.days, max_chunks=request.max_chunks, strict=request.strict
+            place_id,
+            topics,
+            days=request.days,
+            max_chunks=request.max_chunks,
+            strict=request.strict,
+            text=request.text.strip(),
         )
         return {
             **results,
@@ -1023,6 +1033,7 @@ async def get_location_news(
                 "topic_count": len(topics),
                 "max_chunks": request.max_chunks,
                 "strict": request.strict,
+                "text": request.text.strip(),
             },
             "timestamp": datetime.now().isoformat(),
         }
